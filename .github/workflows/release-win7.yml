@@ -14,13 +14,13 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     steps:
       - name: Restore Geodat Cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: resources
           key: xray-geodat-
 
       - name: Restore Wintun Cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: resources
           key: xray-wintun-
@@ -83,7 +83,7 @@ jobs:
       CGO_ENABLED: 0
     steps:
       - name: Checkout codebase
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Show workflow information
         run: |
@@ -92,17 +92,18 @@ jobs:
           echo "ASSET_NAME=$_NAME" >> $GITHUB_ENV
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
-          check-latest: true
+          go-version: "1.26.6"
+          check-latest: false
 
       - name: Setup patched builder
         run: |
           GOSDK=$(go env GOROOT)
           rm -r $GOSDK/*
           cd $GOSDK
-          curl -O -L -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" https://github.com/XTLS/go-win7/releases/latest/download/go-for-win7-linux-amd64.zip
+          curl --fail --location --output go-for-win7-linux-amd64.zip -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" https://github.com/XTLS/go-win7/releases/download/patched-1.26.5/go-for-win7-linux-amd64.zip
+          echo "aaec2901eb40be5068edce46267c4a287f2ac38cbfd9bbcb76f0320df7168e2d  go-for-win7-linux-amd64.zip" | sha256sum --check --strict
           unzip ./go-for-win7-linux-amd64.zip -d $GOSDK
           rm ./go-for-win7-linux-amd64.zip
 
@@ -119,13 +120,13 @@ jobs:
           # go build -o build_assets/wxray.exe -trimpath -buildvcs=false -gcflags="all=-l=4" -ldflags="-H windowsgui -X github.com/xtls/xray-core/core.build=${COMMID} -s -w -buildid=" -v ./main
 
       - name: Restore Geodat Cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: resources
           key: xray-geodat-
 
       - name: Restore Wintun Cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: resources
           key: xray-wintun-
@@ -168,7 +169,7 @@ jobs:
           done
 
       - name: Upload binaries to release
-        uses: svenstaro/upload-release-action@v2
+        uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # v2.11.5
         if: github.event_name == 'release'
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
@@ -177,7 +178,7 @@ jobs:
           file_glob: true
 
       - name: Upload files to Artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: Xray-${{ env.ASSET_NAME }}
           path: |

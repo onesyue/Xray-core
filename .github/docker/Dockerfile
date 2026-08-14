@@ -1,5 +1,5 @@
-# syntax=docker/dockerfile:latest
-FROM --platform=$BUILDPLATFORM golang:latest AS build
+# syntax=docker/dockerfile:1.26.0@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+FROM --platform=$BUILDPLATFORM golang:1.26.6@sha256:640a234f4bea3e399c056b7b8f9c667c4939befae8db2f14e9785e16eccd4205 AS build
 
 # Build xray-core
 WORKDIR /src
@@ -46,7 +46,7 @@ RUN mkdir -p /tmp/var/log/xray && touch \
   /tmp/var/log/xray/error.log
 
 # Build finally image
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
 
 COPY --from=build --chown=0:0 --chmod=755 /src/xray /usr/local/bin/xray
 COPY --from=build --chown=65532:65532 --chmod=755 /tmp/empty /usr/local/share/xray
