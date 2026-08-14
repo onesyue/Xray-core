@@ -1,5 +1,15 @@
 name: Build and Release for Windows 7
 
+# XTLS/go-win7 has no reviewed patched-1.26.6 compiler release as of
+# 2026-08-14. Keep the manifest explicitly unavailable: non-release CI skips
+# obsolete Win7 artifacts, while a release event fails in the verification job
+# instead of silently publishing a binary built below the security floor.
+env:
+  GO_SECURITY_FLOOR: "1.26.6"
+  WIN7_PATCHED_GO_VERSION: "unavailable"
+  WIN7_PATCHED_GO_ARCHIVE_URL: ""
+  WIN7_PATCHED_GO_ARCHIVE_SHA256: ""
+
 on:
   workflow_dispatch:
   release:
@@ -9,6 +19,40 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
+  verify-win7-toolchain:
+    runs-on: ubuntu-latest
+    outputs:
+      available: ${{ steps.verify.outputs.available }}
+    steps:
+      - name: Checkout codebase
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Require a reviewed patched compiler at the security floor
+        id: verify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          module_minor="$(awk '$1 == "go" { print $2; exit }' go.mod)"
+          expected_url="https://github.com/XTLS/go-win7/releases/download/patched-${WIN7_PATCHED_GO_VERSION}/go-for-win7-linux-amd64.zip"
+          available=true
+          [[ "$WIN7_PATCHED_GO_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || available=false
+          [[ "$WIN7_PATCHED_GO_VERSION" == "${module_minor}."* ]] || available=false
+          [[ "$WIN7_PATCHED_GO_VERSION" == "$GO_SECURITY_FLOOR" ]] || available=false
+          [[ "$WIN7_PATCHED_GO_ARCHIVE_URL" == "$expected_url" ]] || available=false
+          [[ "$WIN7_PATCHED_GO_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]] || available=false
+          if [[ "$available" != true ]]; then
+            message="No reviewed XTLS/go-win7 patched-${GO_SECURITY_FLOOR} toolchain is pinned; Win7 artifacts are disabled"
+            if [[ "$EVENT_NAME" == "release" ]]; then
+              echo "::error::$message"
+              exit 1
+            fi
+            echo "::warning::$message"
+            exit 0
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
   check-assets:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
@@ -59,7 +103,7 @@ jobs:
         run: sleep 90
 
   build:
-    needs: check-assets
+    needs: [check-assets, verify-win7-toolchain]
     permissions:
       contents: write
     strategy:
@@ -76,7 +120,10 @@ jobs:
       fail-fast: false
 
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    if: >-
+      needs.verify-win7-toolchain.outputs.available == 'true' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name)
     env:
       GOOS: ${{ matrix.goos}}
       GOARCH: ${{ matrix.goarch }}
@@ -99,13 +146,20 @@ jobs:
 
       - name: Setup patched builder
         run: |
-          GOSDK=$(go env GOROOT)
-          rm -r $GOSDK/*
-          cd $GOSDK
-          curl --fail --location --output go-for-win7-linux-amd64.zip -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" https://github.com/XTLS/go-win7/releases/download/patched-1.26.5/go-for-win7-linux-amd64.zip
-          echo "aaec2901eb40be5068edce46267c4a287f2ac38cbfd9bbcb76f0320df7168e2d  go-for-win7-linux-amd64.zip" | sha256sum --check --strict
-          unzip ./go-for-win7-linux-amd64.zip -d $GOSDK
+          set -euo pipefail
+          GOSDK="$(go env GOROOT)"
+          rm -r "${GOSDK:?}"/*
+          cd "$GOSDK"
+          curl --fail --show-error --silent --location --proto '=https' --tlsv1.2 \
+            --output go-for-win7-linux-amd64.zip \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "$WIN7_PATCHED_GO_ARCHIVE_URL"
+          echo "$WIN7_PATCHED_GO_ARCHIVE_SHA256  go-for-win7-linux-amd64.zip" \
+            | sha256sum --check --strict
+          unzip ./go-for-win7-linux-amd64.zip -d "$GOSDK"
           rm ./go-for-win7-linux-amd64.zip
+          test "$(go env GOVERSION)" = "go${WIN7_PATCHED_GO_VERSION}"
+          go version
 
       - name: Get project dependencies
         run: go mod download
@@ -116,6 +170,9 @@ jobs:
           COMMID=$(git describe --always --dirty)
           echo 'Building Xray for Windows 7...'
           go build -o build_assets/xray.exe -trimpath -buildvcs=false -gcflags="all=-l=4" -ldflags="-X github.com/xtls/xray-core/core.build=${COMMID} -s -w -buildid=" -v ./main
+          go version -m build_assets/xray.exe \
+            | awk -v required="go${WIN7_PATCHED_GO_VERSION}" \
+              'NR == 1 && $2 == required { found = 1 } END { exit !found }'
           # The line below is for without running conhost.exe version. Commented for not being used. Provided for reference.
           # go build -o build_assets/wxray.exe -trimpath -buildvcs=false -gcflags="all=-l=4" -ldflags="-H windowsgui -X github.com/xtls/xray-core/core.build=${COMMID} -s -w -buildid=" -v ./main
 
