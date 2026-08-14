@@ -5,35 +5,49 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+env:
+  # Immutable official v2fly release assets. Keep these values in sync with
+  # scripts/ci/check-test-assets-contract.py when deliberately updating data.
+  GEOSITE_URL: https://github.com/v2fly/domain-list-community/releases/download/20260813115850/dlc.dat
+  GEOSITE_SHA256: b9a7877c99b2ab7580366d764e345789d6bbb8cb02579266346ada6e48070222
+  # 202601220433 is the latest official release that still satisfies Xray's
+  # checked-in IPv6 country matcher fixture (2001:4860:4860::8888 in US).
+  GEOIP_URL: https://github.com/v2fly/geoip/releases/download/202601220433/geoip.dat
+  GEOIP_SHA256: ed2de9add79623e2e5dbc5930ee39cc7037a7c6e0ecd58ba528b6f73d61457b5
+
 jobs:
   check-assets:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    permissions:
+      contents: read
     steps:
-      - name: Restore Geodat Cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: resources
-          key: xray-geodat-
-      - name: Check Assets Existence
-        id: check-assets
+      - name: Checkout codebase
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check Test Asset Contract
+        run: python3 scripts/ci/check-test-assets-contract.py
+      - name: Download and Verify Official Test Assets
+        shell: bash
         run: |
-          [ -d 'resources' ] || mkdir resources
-          LIST=('geoip.dat' 'geosite.dat')
-          for FILE_NAME in "${LIST[@]}"
-          do
-            echo -e "Checking ${FILE_NAME}..."
-            if [ -s "./resources/${FILE_NAME}" ]; then
-              echo -e "${FILE_NAME} exists."
-            else
-              echo -e "${FILE_NAME} does not exist."
-              echo "missing=true" >> $GITHUB_OUTPUT
-              break
-            fi
-          done
-      - name: Sleep for 90 seconds if Assets Missing
-        if: steps.check-assets.outputs.missing == 'true'
-        run: sleep 90
+          set -euo pipefail
+          mkdir -p resources
+          curl --fail --location --retry 5 --retry-all-errors \
+            --output resources/geosite.dat "$GEOSITE_URL"
+          curl --fail --location --retry 5 --retry-all-errors \
+            --output resources/geoip.dat "$GEOIP_URL"
+          printf '%s  %s\n' \
+            "$GEOSITE_SHA256" resources/geosite.dat \
+            "$GEOIP_SHA256" resources/geoip.dat | sha256sum --check --strict
+      - name: Upload Verified Test Assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: xray-test-assets-${{ github.sha }}
+          path: |
+            resources/geoip.dat
+            resources/geosite.dat
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
   check-proto:
     runs-on: ubuntu-latest
@@ -89,11 +103,26 @@ jobs:
         with:
           go-version: "1.26.6"
           check-latest: false
-      - name: Restore Geodat Cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Download Verified Test Assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          name: xray-test-assets-${{ github.sha }}
           path: resources
-          key: xray-geodat-
-          enableCrossOsArchive: true
+      - name: Verify Test Assets
+        shell: pwsh
+        run: |
+          $Expected = @{
+            "resources/geosite.dat" = $env:GEOSITE_SHA256
+            "resources/geoip.dat" = $env:GEOIP_SHA256
+          }
+          foreach ($Entry in $Expected.GetEnumerator()) {
+            if (-not (Test-Path -PathType Leaf $Entry.Key)) {
+              throw "Required test asset is missing: $($Entry.Key)"
+            }
+            $Actual = (Get-FileHash -Algorithm SHA256 $Entry.Key).Hash.ToLowerInvariant()
+            if ($Actual -ne $Entry.Value) {
+              throw "SHA-256 mismatch for $($Entry.Key): expected $($Entry.Value), got $Actual"
+            }
+          }
       - name: Test
         run: go test -timeout 1h -v ./...
