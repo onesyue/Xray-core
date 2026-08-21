@@ -1,14 +1,13 @@
 name: Build and Release for Windows 7
 
-# XTLS/go-win7 has no reviewed patched-1.26.6 compiler release as of
-# 2026-08-14. Keep the manifest explicitly unavailable: non-release CI skips
-# obsolete Win7 artifacts, while a release event fails in the verification job
-# instead of silently publishing a binary built below the security floor.
+# XTLS/go-win7 published patched-1.26.7 on 2026-08-20. Pin the exact archive
+# URL and GitHub-published SHA-256 so Win7 artifacts use the same security patch
+# floor as every other target instead of being silently built by an older SDK.
 env:
-  GO_SECURITY_FLOOR: "1.26.6"
-  WIN7_PATCHED_GO_VERSION: "unavailable"
-  WIN7_PATCHED_GO_ARCHIVE_URL: ""
-  WIN7_PATCHED_GO_ARCHIVE_SHA256: ""
+  GO_SECURITY_FLOOR: "1.26.7"
+  WIN7_PATCHED_GO_VERSION: "1.26.7"
+  WIN7_PATCHED_GO_ARCHIVE_URL: "https://github.com/XTLS/go-win7/releases/download/patched-1.26.7/go-for-win7-linux-amd64.zip"
+  WIN7_PATCHED_GO_ARCHIVE_SHA256: "3ec8549eab338720c1a891f37c6d2467e7205997554bf649527d083f9973b82d"
 
 on:
   workflow_dispatch:
@@ -141,7 +140,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.6"
+          go-version: "1.26.7"
           check-latest: false
 
       - name: Setup patched builder
