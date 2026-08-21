@@ -16,6 +16,8 @@ on:
         type: boolean
         default: false
 
+permissions: {}
+
 jobs:
   build-and-push:
     if: (github.event.action != 'published') || (github.event.action == 'published' && github.event.release.prerelease == true)
@@ -29,17 +31,24 @@ jobs:
         env:
           IMAGE_NAME: "${{ github.repository }}"
         run: |
-          echo "IMAGE_NAME=${IMAGE_NAME,,}" >>${GITHUB_ENV}
-          echo "FULL_IMAGE_NAME=ghcr.io/${IMAGE_NAME,,}" >>${GITHUB_ENV}
+          echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+          echo "FULL_IMAGE_NAME=ghcr.io/${IMAGE_NAME,,}" >> "$GITHUB_ENV"
 
       - name: Validate and extract tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_LATEST: ${{ github.event.inputs.latest }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          SOURCE_TAG="${{ github.event.inputs.tag }}"
+          SOURCE_TAG="$INPUT_TAG"
           if [[ -z "$SOURCE_TAG" ]]; then
-            SOURCE_TAG="${{ github.ref_name }}"
+            SOURCE_TAG="$REF_NAME"
           fi
           if [[ -z "$SOURCE_TAG" ]]; then
-            SOURCE_TAG="${{ github.event.release.tag_name }}"
+            SOURCE_TAG="$RELEASE_TAG"
           fi
 
           if [[ -z "$SOURCE_TAG" ]]; then
@@ -53,24 +62,33 @@ jobs:
             IMAGE_TAG="$SOURCE_TAG"
           fi
 
+          # A workflow_dispatch input is untrusted shell data. Restrict it to
+          # the OCI/Docker tag alphabet before writing it to GITHUB_ENV or
+          # using it as a command argument. This also rejects newlines and
+          # prevents environment-file command injection.
+          if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "Error: '$IMAGE_TAG' is not a valid Docker image tag."
+            exit 1
+          fi
+
           echo "Docker image tag: '$IMAGE_TAG'."
-          echo "IMAGE_TAG=$IMAGE_TAG" >>${GITHUB_ENV}
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
 
           LATEST=false
-          if [[ "${{ github.event_name }}" == "release" && "${{ github.event.release.prerelease }}" == "false" ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.latest }}" == "true" ]]; then
+          if [[ "$EVENT_NAME" == "release" && "$RELEASE_PRERELEASE" == "false" ]] || [[ "$EVENT_NAME" == "workflow_dispatch" && "$INPUT_LATEST" == "true" ]]; then
             LATEST=true
           fi
 
           echo "Latest: '$LATEST'."
-          echo "LATEST=$LATEST" >>${GITHUB_ENV}
+          echo "LATEST=$LATEST" >> "$GITHUB_ENV"
 
           NEWEST=false
-          if [[ "${{ github.event_name }}" == "release" ]]; then
+          if [[ "$EVENT_NAME" == "release" ]]; then
             NEWEST=true
           fi
 
           echo "Newest: '$NEWEST'."
-          echo "NEWEST=$NEWEST" >>${GITHUB_ENV}
+          echo "NEWEST=$NEWEST" >> "$GITHUB_ENV"
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -118,35 +136,38 @@ jobs:
           outputs: type=image,name=${{ env.FULL_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Create manifest list and push
+        env:
+          ADDITIONAL_DIGEST: ${{ steps.build_additional_arches.outputs.digest }}
+          MAIN_DIGEST: ${{ steps.build_main_arches.outputs.digest }}
         run: |
-          echo "Creating multi-arch manifest with tag: '${{ env.FULL_IMAGE_NAME }}:${{ env.IMAGE_TAG }}'."
+          echo "Creating multi-arch manifest with tag: '$FULL_IMAGE_NAME:$IMAGE_TAG'."
           docker buildx imagetools create \
-            --tag ${{ env.FULL_IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
-            ${{ env.FULL_IMAGE_NAME }}@${{ steps.build_main_arches.outputs.digest }} \
-            ${{ env.FULL_IMAGE_NAME }}@${{ steps.build_additional_arches.outputs.digest }}
+            --tag "$FULL_IMAGE_NAME:$IMAGE_TAG" \
+            "$FULL_IMAGE_NAME@$MAIN_DIGEST" \
+            "$FULL_IMAGE_NAME@$ADDITIONAL_DIGEST"
 
-          if [[ "${{ env.LATEST }}" == "true" ]]; then
-            echo "Adding 'latest' tag to manifest: '${{ env.FULL_IMAGE_NAME }}:latest'."
+          if [[ "$LATEST" == "true" ]]; then
+            echo "Adding 'latest' tag to manifest: '$FULL_IMAGE_NAME:latest'."
             docker buildx imagetools create \
-            --tag ${{ env.FULL_IMAGE_NAME }}:latest \
-            ${{ env.FULL_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            --tag "$FULL_IMAGE_NAME:latest" \
+            "$FULL_IMAGE_NAME:$IMAGE_TAG"
           fi
 
-          if [[ "${{ env.NEWEST }}" == "true" ]]; then
-            echo "Adding 'pre-release' tag to manifest: '${{ env.FULL_IMAGE_NAME }}:pre-release'."
+          if [[ "$NEWEST" == "true" ]]; then
+            echo "Adding 'pre-release' tag to manifest: '$FULL_IMAGE_NAME:pre-release'."
             docker buildx imagetools create \
-            --tag ${{ env.FULL_IMAGE_NAME }}:pre-release \
-            ${{ env.FULL_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            --tag "$FULL_IMAGE_NAME:pre-release" \
+            "$FULL_IMAGE_NAME:$IMAGE_TAG"
           fi
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.FULL_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          docker buildx imagetools inspect "$FULL_IMAGE_NAME:$IMAGE_TAG"
 
-          if [[ "${{ env.LATEST }}" == "true" ]]; then
-            docker buildx imagetools inspect ${{ env.FULL_IMAGE_NAME }}:latest
+          if [[ "$LATEST" == "true" ]]; then
+            docker buildx imagetools inspect "$FULL_IMAGE_NAME:latest"
           fi
 
-          if [[ "${{ env.NEWEST }}" == "true" ]]; then
-            docker buildx imagetools inspect ${{ env.FULL_IMAGE_NAME }}:pre-release
+          if [[ "$NEWEST" == "true" ]]; then
+            docker buildx imagetools inspect "$FULL_IMAGE_NAME:pre-release"
           fi
