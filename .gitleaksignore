@@ -1,0 +1,6 @@
+# Historical upstream test vectors and one algorithm-size constant. Each
+# exception is pinned to an immutable commit, path, rule, and line.
+c7f7c08eadc1f495da26c8fa73e8d3f0c9e35faa:infra/conf/mtproto_test.go:generic-api-key:23
+e18b52a5dfac3b0a1a66151f86a8ea21fdda0fb0:infra/conf/wireguard_test.go:generic-api-key:18
+e18b52a5dfac3b0a1a66151f86a8ea21fdda0fb0:infra/conf/wireguard_test.go:generic-api-key:32
+92ada2dd1d5159bb0ed954298d9f4662def23d45:transport/internet/finalmask/salamander/obfs/salamander.go:generic-api-key:15
