@@ -186,6 +186,19 @@ func (h *AlwaysOnInboundHandler) Start() error {
 	return nil
 }
 
+// StopAccepting closes listener hubs only. Protocol validators and active
+// connection goroutines remain alive until the manager's final Close.
+func (h *AlwaysOnInboundHandler) StopAccepting() error {
+	var errs []error
+	for _, worker := range h.workers {
+		errs = append(errs, worker.StopAccepting())
+	}
+	if err := errors.Combine(errs...); err != nil {
+		return errors.New("failed to stop inbound listeners").Base(err)
+	}
+	return nil
+}
+
 // Close implements common.Closable.
 func (h *AlwaysOnInboundHandler) Close() error {
 	var errs []error

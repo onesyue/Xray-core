@@ -494,37 +494,67 @@ func ReshapeMultiBuffer(ctx context.Context, buffer buf.MultiBuffer) buf.MultiBu
 
 // XtlsPadding add padding to eliminate length signature during tls handshake
 func XtlsPadding(b *buf.Buffer, command byte, userUUID *[]byte, longPadding bool, ctx context.Context, testseed []uint32) *buf.Buffer {
-	var contentLen int32 = 0
-	var paddingLen int32 = 0
+	var contentLen int32
 	if b != nil {
 		contentLen = b.Len()
 	}
-	if contentLen < int32(testseed[0]) && longPadding {
-		l, err := rand.Int(rand.Reader, big.NewInt(int64(testseed[1])))
+	if len(testseed) < 4 {
+		testseed = []uint32{900, 500, 900, 256}
+	}
+	randomPadding := func(upper uint32) int64 {
+		if upper == 0 {
+			return 0
+		}
+		value, err := rand.Int(rand.Reader, big.NewInt(int64(upper)))
 		if err != nil {
 			errors.LogDebugInner(ctx, err, "failed to generate padding")
+			return 0
 		}
-		paddingLen = int32(l.Int64()) + int32(testseed[2]) - contentLen
+		return value.Int64()
+	}
+
+	var padding int64
+	if int64(contentLen) < int64(testseed[0]) && longPadding {
+		padding = randomPadding(testseed[1]) + int64(testseed[2]) - int64(contentLen)
 	} else {
-		l, err := rand.Int(rand.Reader, big.NewInt(int64(testseed[3])))
-		if err != nil {
-			errors.LogDebugInner(ctx, err, "failed to generate padding")
-		}
-		paddingLen = int32(l.Int64())
+		padding = randomPadding(testseed[3])
 	}
-	if paddingLen > buf.Size-21-contentLen {
-		paddingLen = buf.Size - 21 - contentLen
+	// A caller should normally reshape payloads to leave room for the 16-byte
+	// UUID and 5-byte Vision header. Treat that as an optimization, not a safety
+	// precondition: a full buffer previously made maxPadding negative and then
+	// panicked in Buffer.Extend. Malformed seed values could do so independently.
+	maxPadding := int64(buf.Size - 21 - contentLen)
+	if maxPadding < 0 {
+		maxPadding = 0
 	}
-	newbuffer := buf.New()
+	if padding < 0 {
+		padding = 0
+	} else if padding > maxPadding {
+		padding = maxPadding
+	}
+	paddingLen := int32(padding)
+
+	uuidLen := 0
 	if userUUID != nil {
-		newbuffer.Write(*userUUID)
+		uuidLen = len(*userUUID)
+	}
+	required := int32(uuidLen) + 5 + contentLen + paddingLen
+	var newbuffer *buf.Buffer
+	if required <= buf.Size {
+		newbuffer = buf.New()
+	} else {
+		// Preserve the payload instead of relying on Buffer.Write's short write.
+		// The peer accepts a Vision block split across transport buffers.
+		newbuffer = buf.NewWithSize(required)
+	}
+	if userUUID != nil {
+		_, _ = newbuffer.Write(*userUUID)
 		*userUUID = nil
 	}
-	newbuffer.Write([]byte{command, byte(contentLen >> 8), byte(contentLen), byte(paddingLen >> 8), byte(paddingLen)})
+	_, _ = newbuffer.Write([]byte{command, byte(contentLen >> 8), byte(contentLen), byte(paddingLen >> 8), byte(paddingLen)})
 	if b != nil {
-		newbuffer.Write(b.Bytes())
+		_, _ = newbuffer.Write(b.Bytes())
 		b.Release()
-		b = nil
 	}
 	newbuffer.Extend(paddingLen)
 	errors.LogDebug(ctx, "XtlsPadding ", contentLen, " ", paddingLen, " ", command)
@@ -751,26 +781,31 @@ func CopyRawConnIfExist(ctx context.Context, readerConn net.Conn, writerConn net
 		}
 		if splice {
 			errors.LogDebug(ctx, "CopyRawConn splice")
-			statWriter, _ := writer.(*dispatcher.SizeStatWriter)
+			legacyUserCounter := dispatcher.FindSizeStatCounter(writer)
+			nativeUserCounter := dispatcher.FindAccountingCounter(writer)
 			//runtime.Gosched() // necessary
 			timer.SetTimeout(24 * time.Hour) // prevent leak, just in case
 			if inTimer != nil {
 				inTimer.SetTimeout(24 * time.Hour)
 			}
-			w, err := tc.ReadFrom(readerConn)
-			if readCounter != nil {
-				readCounter.Add(w) // outbound stats
-			}
-			if writeCounter != nil {
-				writeCounter.Add(w) // inbound stats
-			}
-			if statWriter != nil {
-				statWriter.Counter.Add(w) // user stats
-			}
-			if err != nil && errors.Cause(err) != io.EOF {
-				return err
-			}
-			return nil
+			return copyRawConnCounted(tc, readerConn, func(w int64) {
+				if readCounter != nil {
+					readCounter.Add(w) // outbound stats
+				}
+				if writeCounter != nil {
+					writeCounter.Add(w) // inbound stats
+				}
+				if legacyUserCounter != nil {
+					legacyUserCounter.Add(w)
+				}
+				if nativeUserCounter != nil {
+					nativeUserCounter.Add(w)
+				}
+				timer.Update()
+				if inTimer != nil {
+					inTimer.Update()
+				}
+			})
 		}
 		buffer, err := reader.ReadMultiBuffer()
 		if !buffer.IsEmpty() {
@@ -787,6 +822,34 @@ func CopyRawConnIfExist(ctx context.Context, readerConn net.Conn, writerConn net
 				return nil
 			}
 			return err
+		}
+	}
+}
+
+const rawCopyAccountingChunk = 1 << 20
+
+type readFromWriter interface {
+	ReadFrom(io.Reader) (int64, error)
+}
+
+// copyRawConnCounted bounds each ReadFrom call so counters are visible while a
+// long-lived Vision connection is still open. On Linux, net.TCPConn.ReadFrom
+// retains the kernel splice path for a LimitedReader over another TCPConn.
+func copyRawConnCounted(dst readFromWriter, src io.Reader, onChunk func(int64)) error {
+	for {
+		limited := &io.LimitedReader{R: src, N: rawCopyAccountingChunk}
+		written, err := dst.ReadFrom(limited)
+		if written > 0 && onChunk != nil {
+			onChunk(written)
+		}
+		if err != nil {
+			if errors.Cause(err) == io.EOF {
+				return nil
+			}
+			return err
+		}
+		if written < rawCopyAccountingChunk {
+			return nil
 		}
 	}
 }

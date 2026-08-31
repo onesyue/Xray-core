@@ -11,6 +11,7 @@ import (
 	"github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/signal"
+	"github.com/xtls/xray-core/features/stats"
 )
 
 // NewID generates a new ID. The generated ID is high likely to be unique, but not cryptographically secure.
@@ -56,6 +57,11 @@ type Inbound struct {
 	// CanSpliceCopy is a property for this connection
 	// 1 = can, 2 = after processing protocol info should be able to, 3 = cannot
 	CanSpliceCopy int
+	// UserUplinkCounter and UserDownlinkCounter are optional counters injected
+	// by an embedding application. They remain visible when Vision switches
+	// from buffered copy to raw kernel splice.
+	UserUplinkCounter   stats.Counter
+	UserDownlinkCounter stats.Counter
 }
 
 // Outbound is the metadata of an outbound connection.
