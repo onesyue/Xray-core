@@ -19,13 +19,15 @@ type Manager struct {
 	access           sync.RWMutex
 	untaggedHandlers []inbound.Handler
 	taggedHandlers   map[string]inbound.Handler
+	retiredHandlers  map[string]inbound.Handler
 	running          bool
 }
 
 // New returns a new Manager for inbound handlers.
 func New(ctx context.Context, config *proxyman.InboundConfig) (*Manager, error) {
 	m := &Manager{
-		taggedHandlers: make(map[string]inbound.Handler),
+		taggedHandlers:  make(map[string]inbound.Handler),
+		retiredHandlers: make(map[string]inbound.Handler),
 	}
 	return m, nil
 }
@@ -44,6 +46,9 @@ func (m *Manager) AddHandler(ctx context.Context, handler inbound.Handler) error
 	if len(tag) > 0 {
 		if _, found := m.taggedHandlers[tag]; found {
 			return errors.New("existing tag found: " + tag)
+		}
+		if _, found := m.retiredHandlers[tag]; found {
+			return errors.New("retired tag found: " + tag)
 		}
 		m.taggedHandlers[tag] = handler
 	} else {
@@ -85,8 +90,47 @@ func (m *Manager) RemoveHandler(ctx context.Context, tag string) error {
 		delete(m.taggedHandlers, tag)
 		return nil
 	}
+	if handler, found := m.retiredHandlers[tag]; found {
+		if err := handler.Close(); err != nil {
+			errors.LogWarningInner(ctx, err, "failed to close retired handler ", tag)
+		}
+		delete(m.retiredHandlers, tag)
+		return nil
+	}
 
 	return common.ErrNoClue
+}
+
+// StopAccepting removes a tagged handler from lookup and closes only its
+// listener. The manager retains ownership so final Close releases protocol
+// state after already accepted sessions drain.
+func (m *Manager) StopAccepting(ctx context.Context, tag string) error {
+	if tag == "" {
+		return common.ErrNoClue
+	}
+
+	m.access.Lock()
+	defer m.access.Unlock()
+	if _, found := m.retiredHandlers[tag]; found {
+		return nil
+	}
+	handler, found := m.taggedHandlers[tag]
+	if !found {
+		return common.ErrNoClue
+	}
+	draining, ok := handler.(inbound.DrainingHandler)
+	if !ok {
+		return errors.New("handler does not support listener drain: ", tag)
+	}
+	if err := draining.StopAccepting(); err != nil {
+		return errors.New("failed to stop accepting on handler ", tag).Base(err)
+	}
+	delete(m.taggedHandlers, tag)
+	if m.retiredHandlers == nil {
+		m.retiredHandlers = make(map[string]inbound.Handler)
+	}
+	m.retiredHandlers[tag] = handler
+	return nil
 }
 
 // ListHandlers implements inbound.Manager.
@@ -139,6 +183,11 @@ func (m *Manager) Close() error {
 		}
 	}
 	for _, handler := range m.untaggedHandlers {
+		if err := handler.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for _, handler := range m.retiredHandlers {
 		if err := handler.Close(); err != nil {
 			errs = append(errs, err)
 		}

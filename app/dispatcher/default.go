@@ -169,6 +169,12 @@ func (d *DefaultDispatcher) getLink(ctx context.Context) (*transport.Link, *tran
 				}
 			}
 		}
+		if sessionInbound.UserUplinkCounter != nil {
+			inboundLink.Writer = &AccountingWriter{
+				Counter: sessionInbound.UserUplinkCounter,
+				Writer:  inboundLink.Writer,
+			}
+		}
 		if p.Stats.UserDownlink {
 			name := "user>>>" + user.Email + ">>>traffic>>>downlink"
 			if c, _ := d.stats.GetOrRegisterCounter(name); c != nil {
@@ -176,6 +182,12 @@ func (d *DefaultDispatcher) getLink(ctx context.Context) (*transport.Link, *tran
 					Counter: c,
 					Writer:  outboundLink.Writer,
 				}
+			}
+		}
+		if sessionInbound.UserDownlinkCounter != nil {
+			outboundLink.Writer = &AccountingWriter{
+				Counter: sessionInbound.UserDownlinkCounter,
+				Writer:  outboundLink.Writer,
 			}
 		}
 
@@ -194,14 +206,21 @@ func WrapLink(ctx context.Context, policyManager policy.Manager, statsManager st
 		user = sessionInbound.User
 	}
 
-	link.Reader = &buf.TimeoutWrapperReader{Reader: link.Reader}
+	timeoutReader := &buf.TimeoutWrapperReader{Reader: link.Reader}
+	link.Reader = timeoutReader
 
 	if user != nil && len(user.Email) > 0 {
 		p := policyManager.ForLevel(user.Level)
 		if p.Stats.UserUplink {
 			name := "user>>>" + user.Email + ">>>traffic>>>uplink"
 			if c, _ := statsManager.GetOrRegisterCounter(name); c != nil {
-				link.Reader.(*buf.TimeoutWrapperReader).Counter = c
+				timeoutReader.Counter = c
+			}
+		}
+		if sessionInbound.UserUplinkCounter != nil {
+			link.Reader = &AccountingReader{
+				Counter: sessionInbound.UserUplinkCounter,
+				Reader:  timeoutReader,
 			}
 		}
 		if p.Stats.UserDownlink {
@@ -211,6 +230,12 @@ func WrapLink(ctx context.Context, policyManager policy.Manager, statsManager st
 					Counter: c,
 					Writer:  link.Writer,
 				}
+			}
+		}
+		if sessionInbound.UserDownlinkCounter != nil {
+			link.Writer = &AccountingWriter{
+				Counter: sessionInbound.UserDownlinkCounter,
+				Writer:  link.Writer,
 			}
 		}
 		if p.Stats.UserOnline {
