@@ -52,6 +52,25 @@ func (r *TimeoutWrapperReader) ReadMultiBuffer() (MultiBuffer, error) {
 	return r.mb, r.err
 }
 
+// ReturnAnError and Recover preserve the pipe-reader control surface when a
+// mux session is wrapped for timeout and accounting.
+func (r *TimeoutWrapperReader) ReturnAnError(err error) {
+	if controlled, ok := r.Reader.(interface{ ReturnAnError(error) }); ok {
+		controlled.ReturnAnError(err)
+		return
+	}
+	if interruptible, ok := r.Reader.(interface{ Interrupt() }); ok {
+		interruptible.Interrupt()
+	}
+}
+
+func (r *TimeoutWrapperReader) Recover() error {
+	if controlled, ok := r.Reader.(interface{ Recover() error }); ok {
+		return controlled.Recover()
+	}
+	return nil
+}
+
 func (r *TimeoutWrapperReader) ReadMultiBufferTimeout(duration time.Duration) (MultiBuffer, error) {
 	if r.done == nil {
 		r.done = make(chan struct{})
