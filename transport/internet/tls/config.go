@@ -45,52 +45,110 @@ func (c *Config) loadSelfCertPool() (*x509.CertPool, error) {
 	return root, nil
 }
 
-// BuildCertificates builds a list of TLS certificates from proto definition.
+func cloneCertificateEntry(entry *Certificate) *Certificate {
+	return &Certificate{
+		Certificate:     slices.Clone(entry.Certificate),
+		Key:             slices.Clone(entry.Key),
+		Usage:           entry.Usage,
+		OcspStapling:    entry.OcspStapling,
+		CertificatePath: entry.CertificatePath,
+		KeyPath:         entry.KeyPath,
+		OneTimeLoading:  entry.OneTimeLoading,
+		BuildChain:      entry.BuildChain,
+	}
+}
+
+func loadX509KeyPair(entry *Certificate) *tls.Certificate {
+	keyPair, err := tls.X509KeyPair(entry.Certificate, entry.Key)
+	if err != nil {
+		errors.LogWarningInner(context.Background(), err, "ignoring invalid X509 key pair")
+		return nil
+	}
+	keyPair.Leaf, err = x509.ParseCertificate(keyPair.Certificate[0])
+	if err != nil {
+		errors.LogWarningInner(context.Background(), err, "ignoring invalid certificate")
+		return nil
+	}
+	return &keyPair
+}
+
+// BuildCertificates builds an immutable certificate snapshot from the proto
+// definition. Reloadable server configurations use buildReloadableCertificates
+// so handshakes never race certificate or OCSP updates.
 func (c *Config) BuildCertificates() []*tls.Certificate {
 	certs := make([]*tls.Certificate, 0, len(c.Certificate))
 	for _, entry := range c.Certificate {
 		if entry.Usage != Certificate_ENCIPHERMENT {
 			continue
 		}
-		getX509KeyPair := func() *tls.Certificate {
-			keyPair, err := tls.X509KeyPair(entry.Certificate, entry.Key)
-			if err != nil {
-				errors.LogWarningInner(context.Background(), err, "ignoring invalid X509 key pair")
-				return nil
-			}
-			keyPair.Leaf, err = x509.ParseCertificate(keyPair.Certificate[0])
-			if err != nil {
-				errors.LogWarningInner(context.Background(), err, "ignoring invalid certificate")
-				return nil
-			}
-			return &keyPair
-		}
-		if keyPair := getX509KeyPair(); keyPair != nil {
+		if keyPair := loadX509KeyPair(cloneCertificateEntry(entry)); keyPair != nil {
 			certs = append(certs, keyPair)
-		} else {
+		}
+	}
+	return certs
+}
+
+type reloadableCertificateStore struct {
+	access sync.RWMutex
+	certs  []*tls.Certificate
+}
+
+func (c *Config) buildReloadableCertificates() *reloadableCertificateStore {
+	type reloadSource struct {
+		entry *Certificate
+		index int
+	}
+
+	store := &reloadableCertificateStore{
+		certs: make([]*tls.Certificate, 0, len(c.Certificate)),
+	}
+	sources := make([]reloadSource, 0, len(c.Certificate))
+	for _, configuredEntry := range c.Certificate {
+		if configuredEntry.Usage != Certificate_ENCIPHERMENT {
 			continue
 		}
-		index := len(certs) - 1
+		// The ticker owns its copy. Mutating the protobuf used to build another
+		// tls.Config would otherwise race certificate reloads.
+		entry := cloneCertificateEntry(configuredEntry)
+		keyPair := loadX509KeyPair(entry)
+		if keyPair == nil {
+			continue
+		}
+		store.certs = append(store.certs, keyPair)
+		sources = append(sources, reloadSource{entry: entry, index: len(store.certs) - 1})
+	}
+
+	// Publish the complete immutable initial snapshot before any watcher starts.
+	// A watcher runs its first callback immediately, so starting one inside the
+	// append loop would race a later slice reallocation.
+	for _, source := range sources {
+		entry := source.entry
+		index := source.index
 		setupOcspTicker(entry, func(isReloaded, isOcspstapling bool) {
-			cert := certs[index]
+			store.access.RLock()
+			certificate := store.certs[index]
+			store.access.RUnlock()
 			if isReloaded {
-				if newKeyPair := getX509KeyPair(); newKeyPair != nil {
-					cert = newKeyPair
-				} else {
+				certificate = loadX509KeyPair(entry)
+				if certificate == nil {
 					return
 				}
 			}
 			if isOcspstapling {
-				if newOCSPData, err := ocsp.GetOCSPForCert(cert.Certificate); err != nil {
+				if newOCSPData, err := ocsp.GetOCSPForCert(certificate.Certificate); err != nil {
 					errors.LogWarningInner(context.Background(), err, "ignoring invalid OCSP")
-				} else if string(newOCSPData) != string(cert.OCSPStaple) {
-					cert.OCSPStaple = newOCSPData
+				} else if !bytes.Equal(newOCSPData, certificate.OCSPStaple) {
+					updated := *certificate
+					updated.OCSPStaple = slices.Clone(newOCSPData)
+					certificate = &updated
 				}
 			}
-			certs[index] = cert
+			store.access.Lock()
+			store.certs[index] = certificate
+			store.access.Unlock()
 		})
 	}
-	return certs
+	return store
 }
 
 func setupOcspTicker(entry *Certificate, callback func(isReloaded, isOcspstapling bool)) {
@@ -245,32 +303,44 @@ func getGetCertificateFunc(c *tls.Config, ca []*Certificate) func(hello *tls.Cli
 
 func getNewGetCertificateFunc(certs []*tls.Certificate, rejectUnknownSNI bool) func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-		if len(certs) == 0 {
-			return nil, errNoCertificates
-		}
-		sni := strings.ToLower(hello.ServerName)
-		if !rejectUnknownSNI && (len(certs) == 1 || sni == "") {
-			return certs[0], nil
-		}
-		gsni := "*"
-		if index := strings.IndexByte(sni, '.'); index != -1 {
-			gsni += sni[index:]
-		}
-		for _, keyPair := range certs {
-			if keyPair.Leaf.Subject.CommonName == sni || keyPair.Leaf.Subject.CommonName == gsni {
-				return keyPair, nil
-			}
-			for _, name := range keyPair.Leaf.DNSNames {
-				if name == sni || name == gsni {
-					return keyPair, nil
-				}
-			}
-		}
-		if rejectUnknownSNI {
-			return nil, errNoCertificates
-		}
+		return selectCertificate(certs, rejectUnknownSNI, hello.ServerName)
+	}
+}
+
+func (s *reloadableCertificateStore) getCertificateFunc(rejectUnknownSNI bool) func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		s.access.RLock()
+		defer s.access.RUnlock()
+		return selectCertificate(s.certs, rejectUnknownSNI, hello.ServerName)
+	}
+}
+
+func selectCertificate(certs []*tls.Certificate, rejectUnknownSNI bool, serverName string) (*tls.Certificate, error) {
+	if len(certs) == 0 {
+		return nil, errNoCertificates
+	}
+	sni := strings.ToLower(serverName)
+	if !rejectUnknownSNI && (len(certs) == 1 || sni == "") {
 		return certs[0], nil
 	}
+	gsni := "*"
+	if index := strings.IndexByte(sni, '.'); index != -1 {
+		gsni += sni[index:]
+	}
+	for _, keyPair := range certs {
+		if keyPair.Leaf.Subject.CommonName == sni || keyPair.Leaf.Subject.CommonName == gsni {
+			return keyPair, nil
+		}
+		for _, name := range keyPair.Leaf.DNSNames {
+			if name == sni || name == gsni {
+				return keyPair, nil
+			}
+		}
+	}
+	if rejectUnknownSNI {
+		return nil, errNoCertificates
+	}
+	return certs[0], nil
 }
 
 func (c *Config) parseServerName() string {
@@ -411,7 +481,7 @@ func (c *Config) GetTLSConfig(opts ...Option) *tls.Config {
 	if len(caCerts) > 0 {
 		config.GetCertificate = getGetCertificateFunc(config, caCerts)
 	} else {
-		config.GetCertificate = getNewGetCertificateFunc(c.BuildCertificates(), c.RejectUnknownSni)
+		config.GetCertificate = c.buildReloadableCertificates().getCertificateFunc(c.RejectUnknownSni)
 	}
 
 	if sn := c.parseServerName(); len(sn) > 0 {

@@ -22,6 +22,26 @@ func RegisterConfig(config interface{}, configCreator ConfigCreator) error {
 	return nil
 }
 
+// ReplaceConfigCreator replaces an already registered config creator and
+// returns the previous creator. Embedding applications can use this narrow hook
+// to decorate a built-in feature without relying on unsafe go:linkname access
+// to typeCreatorRegistry.
+//
+// Like RegisterConfig, this function is intended for package initialization,
+// before any goroutine can call CreateObject.
+func ReplaceConfigCreator(config interface{}, configCreator ConfigCreator) (ConfigCreator, error) {
+	configType := reflect.TypeOf(config)
+	creator, found := typeCreatorRegistry[configType]
+	if !found {
+		return nil, errors.New(configType.String() + " is not registered").AtError()
+	}
+	if configCreator == nil {
+		return nil, errors.New("replacement config creator is nil").AtError()
+	}
+	typeCreatorRegistry[configType] = configCreator
+	return creator, nil
+}
+
 // CreateObject creates an object by its config. The config type must be registered through RegisterConfig().
 func CreateObject(ctx context.Context, config interface{}) (interface{}, error) {
 	configType := reflect.TypeOf(config)

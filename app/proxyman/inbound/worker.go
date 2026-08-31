@@ -18,9 +18,7 @@ import (
 	"github.com/xtls/xray-core/features/routing"
 	"github.com/xtls/xray-core/features/stats"
 	"github.com/xtls/xray-core/proxy"
-	hysteria_proxy "github.com/xtls/xray-core/proxy/hysteria"
 	"github.com/xtls/xray-core/transport/internet"
-	"github.com/xtls/xray-core/transport/internet/hysteria"
 	"github.com/xtls/xray-core/transport/internet/stat"
 	"github.com/xtls/xray-core/transport/internet/tcp"
 	"github.com/xtls/xray-core/transport/internet/udp"
@@ -29,6 +27,7 @@ import (
 
 type worker interface {
 	Start() error
+	StopAccepting() error
 	Close() error
 	Port() net.Port
 	Proxy() proxy.Inbound
@@ -46,7 +45,9 @@ type tcpWorker struct {
 	uplinkCounter   stats.Counter
 	downlinkCounter stats.Counter
 
-	hub internet.Listener
+	hub            internet.Listener
+	stopAcceptOnce sync.Once
+	stopAcceptErr  error
 
 	ctx context.Context
 }
@@ -132,11 +133,7 @@ func (w *tcpWorker) Proxy() proxy.Inbound {
 }
 
 func (w *tcpWorker) Start() error {
-	ctx := context.Background()
-
-	if v, ok := w.proxy.(*hysteria_proxy.Server); ok {
-		ctx = hysteria.ContextWithValidator(ctx, v.HysteriaInboundValidator())
-	}
+	ctx := roleInboundListenContext(w.proxy)
 
 	hub, err := internet.ListenTCP(ctx, w.address, w.port, w.stream, func(conn stat.Connection) {
 		go w.callback(conn)
@@ -150,10 +147,10 @@ func (w *tcpWorker) Start() error {
 
 func (w *tcpWorker) Close() error {
 	var errs []interface{}
+	if err := w.StopAccepting(); err != nil {
+		errs = append(errs, err)
+	}
 	if w.hub != nil {
-		if err := common.Close(w.hub); err != nil {
-			errs = append(errs, err)
-		}
 		if err := common.Close(w.proxy); err != nil {
 			errs = append(errs, err)
 		}
@@ -163,6 +160,15 @@ func (w *tcpWorker) Close() error {
 	}
 
 	return nil
+}
+
+func (w *tcpWorker) StopAccepting() error {
+	w.stopAcceptOnce.Do(func() {
+		if w.hub != nil {
+			w.stopAcceptErr = common.Close(w.hub)
+		}
+	})
+	return w.stopAcceptErr
 }
 
 func (w *tcpWorker) Port() net.Port {
@@ -270,8 +276,10 @@ type udpWorker struct {
 	uplinkCounter   stats.Counter
 	downlinkCounter stats.Counter
 
-	checker    *task.Periodic
-	activeConn map[connID]*udpConn
+	checker        *task.Periodic
+	activeConn     map[connID]*udpConn
+	stopAcceptOnce sync.Once
+	stopAcceptErr  error
 
 	ctx  context.Context
 	cone bool
@@ -436,10 +444,8 @@ func (w *udpWorker) Close() error {
 
 	var errs []interface{}
 
-	if w.hub != nil {
-		if err := w.hub.Close(); err != nil {
-			errs = append(errs, err)
-		}
+	if err := w.StopAccepting(); err != nil {
+		errs = append(errs, err)
 	}
 
 	if w.checker != nil {
@@ -456,6 +462,15 @@ func (w *udpWorker) Close() error {
 		return errors.New("failed to close all resources").Base(errors.New(serial.Concat(errs...)))
 	}
 	return nil
+}
+
+func (w *udpWorker) StopAccepting() error {
+	w.stopAcceptOnce.Do(func() {
+		if w.hub != nil {
+			w.stopAcceptErr = w.hub.Close()
+		}
+	})
+	return w.stopAcceptErr
 }
 
 func (w *udpWorker) Port() net.Port {
@@ -476,7 +491,9 @@ type dsWorker struct {
 	uplinkCounter   stats.Counter
 	downlinkCounter stats.Counter
 
-	hub internet.Listener
+	hub            internet.Listener
+	stopAcceptOnce sync.Once
+	stopAcceptErr  error
 
 	ctx context.Context
 }
@@ -536,10 +553,10 @@ func (w *dsWorker) Start() error {
 
 func (w *dsWorker) Close() error {
 	var errs []interface{}
+	if err := w.StopAccepting(); err != nil {
+		errs = append(errs, err)
+	}
 	if w.hub != nil {
-		if err := common.Close(w.hub); err != nil {
-			errs = append(errs, err)
-		}
 		if err := common.Close(w.proxy); err != nil {
 			errs = append(errs, err)
 		}
@@ -549,6 +566,15 @@ func (w *dsWorker) Close() error {
 	}
 
 	return nil
+}
+
+func (w *dsWorker) StopAccepting() error {
+	w.stopAcceptOnce.Do(func() {
+		if w.hub != nil {
+			w.stopAcceptErr = common.Close(w.hub)
+		}
+	})
+	return w.stopAcceptErr
 }
 
 func IsLocal(ip net.IP) bool {
