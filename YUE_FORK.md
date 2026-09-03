@@ -6,9 +6,35 @@ older branch, or change the pin consumed by `yue-node`.
 ## Baseline
 
 - Canonical repository: `https://github.com/XTLS/Xray-core`
-- Canonical tag: `v26.7.28`
-- Exact base commit: `5ca6f4b7d4dc20a881d4330e498892697627ec0c`
-- Candidate branch: `native/v26.7.28-yue`
+- Latest canonical **release**: `v26.7.28` (still the newest tag upstream has cut)
+- Exact base commit: `cd4ce973e9f6ef3a7acf9a7030927b4143f9ea47` — `upstream/main`, rebased 2026-09-04
+- Previous base: `5ca6f4b7d4dc20a881d4330e498892697627ec0c` (= tag `v26.7.28`)
+
+🚨 The base is now `main`, **not** the `v26.7.28` tag, and the two are not the
+same thing: upstream has 33 unreleased commits on top of that tag and has cut no
+release since 2026-07-28. Anyone reading only the tag will conclude we are
+current when the base has in fact moved past it. The rebase was taken for a
+specific list of production-reachable stability fixes, not for features:
+
+| Upstream commit | Why it matters to this fleet |
+|---|---|
+| `598bde74` | Router: data race in the API path |
+| `77f98eba` | XHTTP client: race condition plus a data race |
+| `dffc7ada` | XHTTP client: `Request.GetBody()` so h2 can replay after GOAWAY |
+| `8ee131cb` | HTTP inbound: potential panic in `readResponseAndHandle100Continue()` |
+| `cd4ce973` | WebSocket client: panic before real dialing in `delayDialConn` |
+| `f124daf5` | Observatory: 100% CPU when no outbound matches `subjectSelector` |
+| `d9c54026` | Sniffing: QUICv2 support |
+| `540b9070` | Transport: bind the UDP outbound socket in the destination family |
+
+Zero of those 33 commits touch `proxy/vless/` or
+`transport/internet/reality/` — verified by tree hash — so REALITY and the
+VLESS encryption surface are unchanged by the move.
+
+The Yue commit applied onto `main` with **no conflicts**. The only conflict in
+the whole rebase was our own `61ad1638` (grpc 1.82.1 → 1.83.1), which upstream
+had already done in `5fe6d621`; it was skipped and superseded by the bump to
+1.83.2.
 
 The branch is intentionally a source-level fork, not a transport fork. Its
 retained changes are application-neutral seams or correctness fixes exercised
