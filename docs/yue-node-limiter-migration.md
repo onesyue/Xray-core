@@ -1,7 +1,10 @@
 # `yue-node` limiter migration gate
 
-This is a migration checklist only. This Xray-core change does not edit
-`yue-node`, its vendored tree, module pin, images, or production deployment.
+This is the retained migration acceptance contract. The source migration is
+present in `yue-node` commit `27d9a401`; this Xray-core change still does not
+edit that repository, its vendored tree, module pin, images, or production
+deployment. Pinning the new Xray commit remains contingent on the regression
+matrix below.
 
 ## Why the limiter moves
 

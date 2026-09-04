@@ -78,8 +78,9 @@ XHTTP change is not justified in the minimum production fork.
 The concrete bandwidth feature from old commits
 `f479355399657c0ed07b3e8ac33e02f727094188` and
 `bd62f984273490e29111c109e0c28024896e486e` is not part of Xray-core. It is
-application policy and must move into `yue-node` before that repository changes
-its pin. The exact migration gate is in
+application policy and has moved into `yue-node` at `27d9a401`: the consumer
+now owns `UserLimiter`, generation-safe publication, and the existing metrics.
+The exact acceptance contract remains in
 [`docs/yue-node-limiter-migration.md`](docs/yue-node-limiter-migration.md).
 
 ## Required gates before a consumer pin change
@@ -92,8 +93,10 @@ go build ./...
 go build -tags yue_profile_vless ./...
 ```
 
-The VLESS dependency audit must additionally prove that `go list -deps -tags
-yue_profile_vless` contains none of these packages:
+From the `yue-node` checkout, the VLESS dependency audit must additionally run
+its canonical `scripts/check-profile-deps.sh` gate (which targets
+`./cmd/yue-node`, not every package in the Xray module) and prove that the
+consumer dependency graph contains none of these packages:
 
 - `github.com/apernet/quic-go`
 - `github.com/xtls/xray-core/common/protocol/quic`
