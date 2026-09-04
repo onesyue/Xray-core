@@ -80,7 +80,7 @@ message QuicParams {
   bool disable_chrome_parrot = 13;
   bool disableGSO = 14;
   int64 max_incoming_streams = 15;
-  bool disable_stateless_reset = 16;    
+  bool disable_stateless_reset = 16;
 }
 
 message CustomSockopt {
@@ -125,9 +125,9 @@ message SocketConfig {
   int32 tcp_keep_alive_interval = 10;
 
   int32 tcp_keep_alive_idle = 11;
-  
+
   string tcp_congestion = 12;
-  
+
   string interface = 13;
 
   bool v6only = 14;
