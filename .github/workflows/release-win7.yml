@@ -1,8 +1,8 @@
 name: Build and Release for Windows 7
 
 # XTLS/go-win7 published patched-1.26.7 on 2026-08-20. Pin the exact archive
-# URL and GitHub-published SHA-256 so Win7 artifacts use the same security patch
-# floor as every other target instead of being silently built by an older SDK.
+# URL and GitHub-published SHA-256 at the reviewed security floor. Native
+# targets use Go 1.26.8 bug fixes; patched-1.26.8 is not published upstream.
 env:
   GO_SECURITY_FLOOR: "1.26.7"
   WIN7_PATCHED_GO_VERSION: "1.26.7"
@@ -80,7 +80,7 @@ jobs:
               echo -e "${FILE_NAME} exists."
             else
               echo -e "${FILE_NAME} does not exist."
-              echo "missing=true" >> $GITHUB_OUTPUT
+              echo "missing=true" >> "$GITHUB_OUTPUT"
               break
             fi
           done
@@ -92,7 +92,7 @@ jobs:
               echo -e "wintun.dll for ${ARCHITECTURE} exists."
             else
               echo -e "wintun.dll for ${ARCHITECTURE} is missing."
-              echo "missing=true" >> $GITHUB_OUTPUT
+              echo "missing=true" >> "$GITHUB_OUTPUT"
               break
             fi
           done
@@ -135,12 +135,12 @@ jobs:
         run: |
           _NAME=${{ matrix.assetname }}
           echo "GOOS: ${{ matrix.goos }}, GOARCH: ${{ matrix.goarch }}, RELEASE_NAME: $_NAME"
-          echo "ASSET_NAME=$_NAME" >> $GITHUB_ENV
+          echo "ASSET_NAME=$_NAME" >> "$GITHUB_ENV"
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.7"
+          go-version: "1.26.8"
           check-latest: false
 
       - name: Setup patched builder
@@ -206,22 +206,22 @@ jobs:
 
       - name: Copy README.md & LICENSE
         run: |
-          cp ${GITHUB_WORKSPACE}/README.md ./build_assets/README.md
-          cp ${GITHUB_WORKSPACE}/LICENSE ./build_assets/LICENSE
+          cp "${GITHUB_WORKSPACE}/README.md" ./build_assets/README.md
+          cp "${GITHUB_WORKSPACE}/LICENSE" ./build_assets/LICENSE
 
       - name: Create ZIP archive
         if: github.event_name == 'release'
         shell: bash
         run: |
           pushd build_assets || exit 1
-          touch -mt $(date +%Y01010000) *
+          touch -mt "$(date +%Y01010000)" ./*
           zip -9vr ../Xray-${{ env.ASSET_NAME }}.zip .
           popd || exit 1
           FILE=./Xray-${{ env.ASSET_NAME }}.zip
           DGST=$FILE.dgst
           for METHOD in {"md5","sha1","sha256","sha512"}
           do
-            openssl dgst -$METHOD $FILE | sed 's/([^)]*)//g' >>$DGST
+            openssl dgst "-$METHOD" "$FILE" | sed 's/([^)]*)//g' >>"$DGST"
           done
 
       - name: Upload binaries to release

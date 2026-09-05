@@ -81,7 +81,7 @@ jobs:
       - name: Force downloading if run manually or on file update
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         run: |
-          echo "FORCE_UPDATE=true" >> $GITHUB_ENV
+          echo "FORCE_UPDATE=true" >> "$GITHUB_ENV"
 
       - name: Update Wintun
         id: update
