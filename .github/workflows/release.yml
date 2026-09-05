@@ -37,7 +37,7 @@ jobs:
               echo -e "${FILE_NAME} exists."
             else
               echo -e "${FILE_NAME} does not exist."
-              echo "missing=true" >> $GITHUB_OUTPUT
+              echo "missing=true" >> "$GITHUB_OUTPUT"
               break
             fi
           done
@@ -49,7 +49,7 @@ jobs:
               echo -e "wintun.dll for ${ARCHITECTURE} exists."
             else
               echo -e "wintun.dll for ${ARCHITECTURE} is missing."
-              echo "missing=true" >> $GITHUB_OUTPUT
+              echo "missing=true" >> "$GITHUB_OUTPUT"
               break
             fi
           done
@@ -182,20 +182,20 @@ jobs:
             ["amd64"]="x86_64-linux-android24-clang"
             ["arm64"]="aarch64-linux-android24-clang"
           )
-          echo CC="$(realpath android-ndk-*/toolchains/llvm/prebuilt/linux-x86_64/bin)/${arches[${{ matrix.goarch }}]}" >> $GITHUB_ENV
-          echo CGO_ENABLED=1 >> $GITHUB_ENV
+          echo CC="$(realpath android-ndk-*/toolchains/llvm/prebuilt/linux-x86_64/bin)/${arches[${{ matrix.goarch }}]}" >> "$GITHUB_ENV"
+          echo CGO_ENABLED=1 >> "$GITHUB_ENV"
 
       - name: Show workflow information
         run: |
           _NAME=${{ matrix.patch-assetname }}
           [ -n "$_NAME" ] || _NAME=$(jq ".[\"$GOOS-$GOARCH$GOARM$GOMIPS\"].friendlyName" -r < .github/build/friendly-filenames.json)
           echo "GOOS: $GOOS, GOARCH: $GOARCH, GOARM: $GOARM, GOMIPS: $GOMIPS, RELEASE_NAME: $_NAME"
-          echo "ASSET_NAME=$_NAME" >> $GITHUB_ENV
+          echo "ASSET_NAME=$_NAME" >> "$GITHUB_ENV"
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.7"
+          go-version: "1.26.8"
           check-latest: false
 
       - name: Get project dependencies
@@ -259,22 +259,22 @@ jobs:
 
       - name: Copy README.md & LICENSE
         run: |
-          cp ${GITHUB_WORKSPACE}/README.md ./build_assets/README.md
-          cp ${GITHUB_WORKSPACE}/LICENSE ./build_assets/LICENSE
+          cp "${GITHUB_WORKSPACE}/README.md" ./build_assets/README.md
+          cp "${GITHUB_WORKSPACE}/LICENSE" ./build_assets/LICENSE
 
       - name: Create ZIP archive
         if: github.event_name == 'release'
         shell: bash
         run: |
           pushd build_assets || exit 1
-          touch -mt $(date +%Y01010000) *
+          touch -mt "$(date +%Y01010000)" ./*
           zip -9vr ../Xray-${{ env.ASSET_NAME }}.zip .
           popd || exit 1
           FILE=./Xray-${{ env.ASSET_NAME }}.zip
           DGST=$FILE.dgst
           for METHOD in {"md5","sha1","sha256","sha512"}
           do
-            openssl dgst -$METHOD $FILE | sed 's/([^)]*)//g' >>$DGST
+            openssl dgst "-$METHOD" "$FILE" | sed 's/([^)]*)//g' >>"$DGST"
           done
 
       - name: Upload binaries to release
