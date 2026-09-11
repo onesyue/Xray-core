@@ -31,6 +31,27 @@ func TestWriter(t *testing.T) {
 	}
 }
 
+// A payload crossing an already partly filled buffer must preserve all bytes.
+// Upstream #6723 fixes ErrBufferFull being reported as a terminal write error.
+func TestBufferedWriterCrossesPartialBuffer(t *testing.T) {
+	var destination bytes.Buffer
+	writer := NewBufferedWriter(NewWriter(&destination))
+	prefix := bytes.Repeat([]byte("p"), Size-7)
+	payload := bytes.Repeat([]byte("payload"), Size)
+	for _, input := range [][]byte{prefix, payload} {
+		n, err := writer.Write(input)
+		if err != nil || n != len(input) {
+			t.Fatalf("Write(%d bytes) = %d, %v", len(input), n, err)
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if want := append(prefix, payload...); !bytes.Equal(destination.Bytes(), want) {
+		t.Fatalf("buffered write changed payload: got %d bytes, want %d", destination.Len(), len(want))
+	}
+}
+
 func TestBytesWriterReadFrom(t *testing.T) {
 	const size = 50000
 	pReader, pWriter := pipe.New(pipe.WithSizeLimit(size))
