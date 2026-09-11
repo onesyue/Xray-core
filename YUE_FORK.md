@@ -1,19 +1,22 @@
 # Yue native fork ledger
 
-This branch is a non-production candidate. It does not move any tag, rewrite an
-older branch, or change the pin consumed by `yue-node`.
+This is the source fork consumed by `yue-node`; its immutable consumer pin and
+deployed revision are owned by that repository and the deployment pipeline.
 
 ## Baseline
 
 - Canonical repository: `https://github.com/XTLS/Xray-core`
-- Latest canonical **release**: `v26.7.28` (still the newest tag upstream has cut)
+- Latest canonical stable release (checked 2026-09-11):
+  [`v26.3.27`](https://github.com/XTLS/Xray-core/releases/tag/v26.3.27).
+- Latest canonical prerelease:
+  [`v26.9.9`](https://github.com/XTLS/Xray-core/releases/tag/v26.9.9).
+  It requires the Go 1.27 line and changes REALITY and transport behavior; this
+  fork does not represent that prerelease as a production-stable upgrade.
 - Exact base commit: `cd4ce973e9f6ef3a7acf9a7030927b4143f9ea47` — `upstream/main`, rebased 2026-09-04
 - Previous base: `5ca6f4b7d4dc20a881d4330e498892697627ec0c` (= tag `v26.7.28`)
 
-🚨 The base is now `main`, **not** the `v26.7.28` tag, and the two are not the
-same thing: upstream has 33 unreleased commits on top of that tag and has cut no
-release since 2026-07-28. Anyone reading only the tag will conclude we are
-current when the base has in fact moved past it. The rebase was taken for a
+The base is the 2026-09-04 `main` snapshot, **not** the `v26.7.28` tag. At that
+point it contained 33 commits beyond that prerelease. The rebase was taken for a
 specific list of production-reachable stability fixes, not for features:
 
 | Upstream commit | Why it matters to this fleet |
@@ -26,6 +29,17 @@ specific list of production-reachable stability fixes, not for features:
 | `f124daf5` | Observatory: 100% CPU when no outbound matches `subjectSelector` |
 | `d9c54026` | Sniffing: QUICv2 support |
 | `540b9070` | Transport: bind the UDP outbound socket in the destination family |
+
+## Selected upstream backports after the snapshot
+
+- [`6ce8dc53` / #6723](https://github.com/XTLS/Xray-core/commit/6ce8dc53e79842af71f0b4a360cb65d9eaa1e8f7):
+  preserve buffered writes crossing the remaining buffer capacity. The exact
+  upstream patch treats `ErrBufferFull` as a partial write, flushes, and
+  continues; `TestBufferedWriterCrossesPartialBuffer` verifies byte-for-byte
+  output after an already partly filled buffer receives several buffers of
+  payload. This does not pull the prerelease's Go/REALITY migration.
+
+The original snapshot comparison below applies before this selected backport.
 
 Zero of those 33 commits touch `proxy/vless/` or
 `transport/internet/reality/` — verified by tree hash — so REALITY and the
