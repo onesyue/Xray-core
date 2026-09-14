@@ -1,13 +1,14 @@
 name: Build and Release for Windows 7
 
-# XTLS/go-win7 published patched-1.26.7 on 2026-08-20. Pin the exact archive
-# URL and GitHub-published SHA-256 at the reviewed security floor. Native
-# targets use Go 1.26.8 bug fixes; patched-1.26.8 is not published upstream.
+# XTLS/go-win7 published patched-1.27.1 on 2026-09-03. Pin the exact archive
+# URL and GitHub-published SHA-256 at the reviewed security floor. go.mod now
+# requires the Go 1.27 line, so the native targets and the Win7 floor both
+# sit on 1.27.1.
 env:
-  GO_SECURITY_FLOOR: "1.26.7"
-  WIN7_PATCHED_GO_VERSION: "1.26.7"
-  WIN7_PATCHED_GO_ARCHIVE_URL: "https://github.com/XTLS/go-win7/releases/download/patched-1.26.7/go-for-win7-linux-amd64.zip"
-  WIN7_PATCHED_GO_ARCHIVE_SHA256: "3ec8549eab338720c1a891f37c6d2467e7205997554bf649527d083f9973b82d"
+  GO_SECURITY_FLOOR: "1.27.1"
+  WIN7_PATCHED_GO_VERSION: "1.27.1"
+  WIN7_PATCHED_GO_ARCHIVE_URL: "https://github.com/XTLS/go-win7/releases/download/patched-1.27.1/go-for-win7-linux-amd64.zip"
+  WIN7_PATCHED_GO_ARCHIVE_SHA256: "4f0434fceea1b1c80c6d3511f0f777b0dc3b1260f172f1bf1ec202575bd36ec1"
 
 on:
   workflow_dispatch:
@@ -140,7 +141,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.8"
+          go-version: "1.27.1"
           check-latest: false
 
       - name: Setup patched builder
