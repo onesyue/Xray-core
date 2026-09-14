@@ -11,6 +11,7 @@ import (
 
 	"github.com/xtls/xray-core/common/errors"
 	"github.com/xtls/xray-core/common/net"
+	"github.com/xtls/xray-core/common/platform"
 	"github.com/xtls/xray-core/common/utils"
 
 	"go4.org/netipx"
@@ -858,7 +859,9 @@ func buildGeoIPRulesKey(rules []*GeoIPRule) string {
 	for i, r := range rules {
 		if i == 0 || (r.File != last.File || r.Code != last.Code) {
 			last = r
-			sb.WriteString(r.File)
+			// See buildDomainRulesKey: the shared IPSet cache is process-global,
+			// so it must key on the resolved asset path.
+			sb.WriteString(platform.GetAssetLocation(r.File))
 			sb.WriteString(":")
 			sb.WriteString(r.Code)
 			sb.WriteString(",")
