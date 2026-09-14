@@ -6,14 +6,63 @@ deployed revision are owned by that repository and the deployment pipeline.
 ## Baseline
 
 - Canonical repository: `https://github.com/XTLS/Xray-core`
-- Latest canonical stable release (checked 2026-09-11):
+- Latest canonical stable release (checked 2026-09-14):
   [`v26.3.27`](https://github.com/XTLS/Xray-core/releases/tag/v26.3.27).
-- Latest canonical prerelease:
+- Latest canonical prerelease (checked 2026-09-14):
   [`v26.9.9`](https://github.com/XTLS/Xray-core/releases/tag/v26.9.9).
-  It requires the Go 1.27 line and changes REALITY and transport behavior; this
-  fork does not represent that prerelease as a production-stable upgrade.
-- Exact base commit: `cd4ce973e9f6ef3a7acf9a7030927b4143f9ea47` — `upstream/main`, rebased 2026-09-04
-- Previous base: `5ca6f4b7d4dc20a881d4330e498892697627ec0c` (= tag `v26.7.28`)
+- Exact base commit: `c412e77a9b712082ac9ebf27fa793951cb5a7d85` — `upstream/main`,
+  rebased 2026-09-14. It is `v26.9.9` plus two commits (`ccb69ea5` Windows
+  `readv` fix, `c412e77a` TUN inbound UDP destinations), neither of which is
+  reachable from the Linux VLESS role.
+- Previous bases: `cd4ce973e9f6ef3a7acf9a7030927b4143f9ea47` (`upstream/main`,
+  2026-09-04, tags `v26.9.4-yue.1` / `v26.9.11-yue.1`);
+  `5ca6f4b7d4dc20a881d4330e498892697627ec0c` (= tag `v26.7.28`).
+
+The base requires the Go 1.27 line (`fd2ca748`); every builder in this
+fork's workflows and Dockerfiles is pinned to 1.27.1.
+
+### What the 2026-09-14 rebase brought in (`cd4ce973..c412e77a`, 17 commits)
+
+| Upstream commit | Why it matters to this fleet |
+|---|---|
+| `6ce8dc53` / #6723 | Buffered writes crossing the remaining buffer capacity — previously carried here as cherry-pick `9859d535`, now dropped as a duplicate (identical patch-id); `TestBufferedWriterCrossesPartialBuffer` stays |
+| `cecc88f4` | grpc-go 1.83.2 — previously carried here as `b2cada76`, dropped as a duplicate |
+| `eef6e63b` | XHTTP client `WaitReadCloser` data race |
+| `3e2f040c`, `c26d2eda` | Direct/Freedom outbound compatibility and `sockopt.dialerProxy` handling |
+| `a1bf968b` | VLESS config `validateOutboundTransportSecurity()` |
+| `18a1b504` | Finalmask: `udpHop` becomes a UDP mask; `QuicParams.udp_hop` / `UdpHop` / `ProxyConfig` messages removed from `transport/internet/config.proto` and its fields renumbered |
+| `de2caf3c`, `01a034be` | Hysteria Unix masquerade socket path; Blackhole custom response |
+| `fd2ca748`, `c037ccd9` | Go 1.27.x; `infra/vformat` now imports gofumpt as a library instead of `go install`ing it |
+| `47cfe999` | `github.com/xtls/reality` bump — **deliberately not adopted, see below** |
+
+Zero of the 17 commits touch `proxy/vless/` or `transport/internet/reality/`
+(verified with `git log cd4ce973..c412e77a -- proxy/vless transport/internet/reality`).
+The REALITY behaviour change lives entirely in the dependency bump.
+
+### Deliberately held back: `github.com/xtls/reality` stays at `20260322125925-9234c772ba8f`
+
+Upstream `47cfe999` moves the module to `20260908062103-8cdf7bf9c7f0`, which
+includes "REALITY protocol: Reject outdated/strange Client Hello that doesn't
+have X25519MLKEM768 before optional X25519". Measured 2026-09-14 with this
+fork's own `UClient` against a local REALITY server on each revision:
+
+| Fingerprint preset | 20260322 (kept) | 20260908 (upstream) |
+|---|---|---|
+| `chrome`, `firefox`, `safari` (auto = modern hello) | authenticated | authenticated |
+| `hellochrome_120`, `hellofirefox_120`, `ios`, `edge`, `random` | authenticated | **rejected — falls through to the camouflage dest** |
+
+mihomo (YueLink's core) strips X25519MLKEM768 from its hello unless the proxy
+sets `support-x25519mlkem768: true`, and the panel's subscription templates do
+not emit that key, so the upstream revision would lock every default-configured
+YueLink/Clash-family client out of every REALITY node.
+`transport/internet/reality/reality_yue_keyshare_test.go` pins the kept
+behaviour and goes red on a silent re-bump. Cost of holding back: the 20260908
+fixes (17 KiB target record buffer, `DetectPostHandshakeRecordsLens`
+panic/leak/race, Go 1.27 sync). Retire the hold once the subscription
+templates emit the MLKEM flag for every mihomo-family client, YueLink ships a
+core that sends X25519MLKEM768 first, and a real-client canary passes.
+
+### Previous rebase: 2026-09-04 onto `cd4ce973` (history, kept for the audit chain)
 
 The base is the 2026-09-04 `main` snapshot, **not** the `v26.7.28` tag. At that
 point it contained 33 commits beyond that prerelease. The rebase was taken for a
@@ -30,7 +79,7 @@ specific list of production-reachable stability fixes, not for features:
 | `d9c54026` | Sniffing: QUICv2 support |
 | `540b9070` | Transport: bind the UDP outbound socket in the destination family |
 
-## Selected upstream backports after the snapshot
+### Selected upstream backports after that snapshot (superseded on 2026-09-14: #6723 is now in the base)
 
 - [`6ce8dc53` / #6723](https://github.com/XTLS/Xray-core/commit/6ce8dc53e79842af71f0b4a360cb65d9eaa1e8f7):
   preserve buffered writes crossing the remaining buffer capacity. The exact
@@ -49,6 +98,21 @@ The Yue commit applied onto `main` with **no conflicts**. The only conflict in
 the whole rebase was our own `61ad1638` (grpc 1.82.1 → 1.83.1), which upstream
 had already done in `5fe6d621`; it was skipped and superseded by the bump to
 1.83.2.
+
+### How to rebase next time
+
+The history carries "reconnect" merges (`-s ours`, tree identical to the
+rebased line) so that `codex/xray-main-yue` and `master` fast-forward without
+force pushes. A plain `git rebase upstream/main` therefore also tries to replay
+the pre-rebase line through the merge's second parent; only the first-parent
+line is the fork. Use:
+
+```sh
+git rebase -i upstream/main   # then keep only: git rev-list --reverse --first-parent upstream/main..HEAD
+```
+
+or drop the second-parent commits from the todo list. Duplicated upstream
+patches are skipped automatically by patch-id.
 
 The branch is intentionally a source-level fork, not a transport fork. Its
 retained changes are application-neutral seams or correctness fixes exercised
