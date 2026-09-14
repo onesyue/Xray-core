@@ -1,6 +1,7 @@
 package dispatcher
 
 import (
+	"context"
 	"time"
 
 	"github.com/xtls/xray-core/common"
@@ -134,3 +135,51 @@ func (r *AccountingReader) Recover() error {
 
 func (r *AccountingReader) Close() error { return common.Close(r.Reader) }
 func (r *AccountingReader) Interrupt()   { common.Interrupt(r.Reader) }
+
+// SplicePacer is implemented by an embedder-owned writer that enforces a
+// per-credential byte rate on the buffered path. Raw splice bypasses every
+// buf.Writer in the chain, so without this seam a rate-limited credential
+// could only be enforced by refusing splice outright (CanSpliceCopy = 3) and
+// paying userspace AEAD for every byte.
+//
+// The contract is deliberately "pay after copy": the pacer is charged for the
+// bytes a chunk actually moved, never for a budget that may go unused. Charging
+// up front would make a trickling connection slower than its configured rate.
+type SplicePacer interface {
+	// SpliceChunkBytes reports the largest chunk the pacer wants copied between
+	// two charges. It bounds how far a single chunk may overshoot the rate, and
+	// keeps one charge inside whatever wait budget the pacer enforces.
+	SpliceChunkBytes() int
+	// ChargeSplice blocks until n copied bytes are paid for. A returned error
+	// tears the connection down, exactly as a buffered-path limiter error does.
+	ChargeSplice(ctx context.Context, n int) error
+}
+
+// SplicePacerSource is implemented by transparent wrappers that own a pacer.
+type SplicePacerSource interface {
+	SplicePacer() SplicePacer
+}
+
+// FindSplicePacer returns the embedder-owned pacer for this writer direction,
+// walking the same transparent wrapper chain as FindAccountingCounter. A nil
+// result means "this direction is not rate limited"; callers that require
+// enforcement must decide that from the session, never from a nil here.
+func FindSplicePacer(writer buf.Writer) SplicePacer {
+	for range 16 {
+		if w, ok := writer.(SplicePacerSource); ok {
+			if p := w.SplicePacer(); p != nil {
+				return p
+			}
+		}
+		w, ok := writer.(WriterUnwrapper)
+		if !ok {
+			return nil
+		}
+		next := w.UnwrapWriter()
+		if next == nil || next == writer {
+			return nil
+		}
+		writer = next
+	}
+	return nil
+}

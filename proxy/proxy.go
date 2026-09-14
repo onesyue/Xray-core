@@ -769,6 +769,21 @@ func CopyRawConnIfExist(ctx context.Context, readerConn net.Conn, writerConn net
 			return readV(ctx, reader, writer, timer, readCounter)
 		}
 	}
+	// A rate-limited credential keeps its token bucket under splice: the pacer
+	// is charged per copied chunk in copyRawConnCounted. Without this seam the
+	// only way to enforce a ceiling was to refuse splice outright and pay
+	// userspace AEAD for every byte of the download.
+	//
+	// Decided here, before the loop and before the "splice" debug line, so a
+	// fail-closed session never logs a splice it does not take.
+	splicePacer := dispatcher.FindSplicePacer(writer)
+	if inbound.RequiresSplicePacing && splicePacer == nil {
+		// The session says this credential is capped but the wrapper chain no
+		// longer carries its bucket. The buffered path is the only one left
+		// that can still enforce it, and an unmetered ceiling is worse than a
+		// lost zero-copy win.
+		return readV(ctx, reader, writer, timer, readCounter)
+	}
 
 	for {
 		inbound := session.InboundFromContext(ctx)
@@ -788,7 +803,7 @@ func CopyRawConnIfExist(ctx context.Context, readerConn net.Conn, writerConn net
 			if inTimer != nil {
 				inTimer.SetTimeout(24 * time.Hour)
 			}
-			return copyRawConnCounted(tc, readerConn, func(w int64) {
+			return copyRawConnCounted(ctx, tc, readerConn, splicePacer, func(w int64) {
 				if readCounter != nil {
 					readCounter.Add(w) // outbound stats
 				}
@@ -832,15 +847,39 @@ type readFromWriter interface {
 	ReadFrom(io.Reader) (int64, error)
 }
 
-// copyRawConnCounted bounds each ReadFrom call so counters are visible while a
-// long-lived Vision connection is still open. On Linux, net.TCPConn.ReadFrom
-// retains the kernel splice path for a LimitedReader over another TCPConn.
-func copyRawConnCounted(dst readFromWriter, src io.Reader, onChunk func(int64)) error {
+// copyRawConnCounted bounds each ReadFrom call so counters -- and, for a
+// rate-limited credential, the token bucket -- observe the transfer while a
+// long-lived Vision connection is still open rather than once at EOF. On Linux,
+// net.TCPConn.ReadFrom retains the kernel splice path for a LimitedReader over
+// another TCPConn.
+//
+// Charging is deliberately "pay after copy": the pacer is told how many bytes
+// a chunk actually moved. Reserving the budget up front would slow a trickling
+// connection below its configured rate, because a chunk that returns short
+// would have already spent the difference. The cost of paying afterwards is a
+// bounded overshoot of at most one chunk, which SpliceChunkBytes sizes.
+func copyRawConnCounted(ctx context.Context, dst readFromWriter, src io.Reader, pacer dispatcher.SplicePacer, onChunk func(int64)) error {
+	chunk := int64(rawCopyAccountingChunk)
+	if pacer != nil {
+		if n := pacer.SpliceChunkBytes(); n > 0 && int64(n) < chunk {
+			chunk = int64(n)
+		}
+	}
 	for {
-		limited := &io.LimitedReader{R: src, N: rawCopyAccountingChunk}
+		limited := &io.LimitedReader{R: src, N: chunk}
 		written, err := dst.ReadFrom(limited)
-		if written > 0 && onChunk != nil {
-			onChunk(written)
+		if written > 0 {
+			if onChunk != nil {
+				onChunk(written)
+			}
+			if pacer != nil {
+				// A pacing failure is the same event as a buffered-path limiter
+				// failure: tear the connection down. Continuing here would serve
+				// an unmetered credential, which is worse than a dropped copy.
+				if perr := pacer.ChargeSplice(ctx, int(written)); perr != nil {
+					return perr
+				}
+			}
 		}
 		if err != nil {
 			if errors.Cause(err) == io.EOF {
@@ -848,7 +887,7 @@ func copyRawConnCounted(dst readFromWriter, src io.Reader, onChunk func(int64)) 
 			}
 			return err
 		}
-		if written < rawCopyAccountingChunk {
+		if written < chunk {
 			return nil
 		}
 	}
