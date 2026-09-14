@@ -8,6 +8,7 @@ import (
 
 	"github.com/xtls/xray-core/common/errors"
 	"github.com/xtls/xray-core/common/geodata/strmatcher"
+	"github.com/xtls/xray-core/common/platform"
 	"github.com/xtls/xray-core/common/utils"
 )
 
@@ -41,7 +42,12 @@ func buildDomainRulesKey(rules []*DomainRule) string {
 			sb.WriteString(",")
 		case *DomainRule_Geosite:
 			cache = true
-			sb.WriteString(v.Geosite.File)
+			// Key on the *resolved* asset path, not the bare file name. The
+			// shared matcher cache is process-global while xray.location.asset
+			// is per-instance, so two embedded instances holding different
+			// geodata directories would otherwise collide on "geosite.dat:CODE"
+			// and the second one would silently reuse the first one's data.
+			sb.WriteString(platform.GetAssetLocation(v.Geosite.File))
 			sb.WriteString(":")
 			sb.WriteString(v.Geosite.Code)
 			sb.WriteString("@")
@@ -114,7 +120,8 @@ type CompactDomainMatcherFactory struct {
 }
 
 func (f *CompactDomainMatcherFactory) getOrCreateFrom(rule *GeoSiteRule) (strmatcher.MatcherSet, error) {
-	key := rule.File + ":" + rule.Code + "@" + rule.Attrs
+	// Same reason as buildDomainRulesKey: this cache is process-global too.
+	key := platform.GetAssetLocation(rule.File) + ":" + rule.Code + "@" + rule.Attrs
 
 	f.Lock()
 	defer f.Unlock()
