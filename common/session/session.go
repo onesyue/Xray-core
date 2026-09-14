@@ -62,6 +62,12 @@ type Inbound struct {
 	// from buffered copy to raw kernel splice.
 	UserUplinkCounter   stats.Counter
 	UserDownlinkCounter stats.Counter
+	// RequiresSplicePacing marks a credential whose byte rate is capped. Raw
+	// splice bypasses every buf.Writer, so the copy may only take that path
+	// when a SplicePacer is actually reachable from the writer chain. When this
+	// is set and no pacer is found, the copy falls back to the buffered path:
+	// serving an unmetered ceiling is worse than losing the zero-copy win.
+	RequiresSplicePacing bool
 }
 
 // Outbound is the metadata of an outbound connection.
