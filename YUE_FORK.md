@@ -11,7 +11,7 @@ deployed revision are owned by that repository and the deployment pipeline.
 - Latest canonical prerelease (checked 2026-09-14):
   [`v26.9.9`](https://github.com/XTLS/Xray-core/releases/tag/v26.9.9).
 - Exact base commit: `c412e77a9b712082ac9ebf27fa793951cb5a7d85` — `upstream/main`,
-  rebased 2026-09-14. It is `v26.9.9` plus two commits (`ccb69ea5` Windows
+  rebased 2026-09-14 (tags `v26.9.14-yue.1`, `v26.9.14-yue.2`). It is `v26.9.9` plus two commits (`ccb69ea5` Windows
   `readv` fix, `c412e77a` TUN inbound UDP destinations), neither of which is
   reachable from the Linux VLESS role.
 - Previous bases: `cd4ce973e9f6ef3a7acf9a7030927b4143f9ea47` (`upstream/main`,
@@ -128,6 +128,39 @@ by the production VLESS role:
 5. Immutable, synchronized TLS certificate reload snapshots.
 6. Vision padding bounds that preserve a full payload instead of panicking or
    silently truncating it.
+7. Paced splice: a `dispatcher.SplicePacer` seam plus `Inbound.RequiresSplicePacing`
+   so a rate-capped credential keeps the raw kernel splice path and is charged
+   per copied chunk instead of being pushed onto userspace AEAD (see below).
+8. Geodata matcher caches keyed on the resolved asset path, so several embedded
+   instances with different `xray.location.asset` directories never share a
+   `geosite.dat:CODE` / `geoip.dat:CODE` entry (see below).
+
+### v26.9.14-yue.2 (2026-09-14): the last two vendor-only patches made native
+
+Until this tag, `yue-node` carried two patches **only inside its `vendor/`
+tree**, re-applied by hand on top of every fork revision and guarded by string
+tests, because any `go mod vendor` regenerated them away silently
+(compilation and tests stayed green; a capped user's download quietly fell back
+to userspace AEAD, and two instances could serve each other's geodata). Both
+are now fork commits with behavioural tests, on the same base `c412e77a`:
+
+| Concern | Files | Tests |
+|---|---|---|
+| Paced splice — `SplicePacer` / `SplicePacerSource` / `FindSplicePacer`; `Inbound.RequiresSplicePacing`; `copyRawConnCounted` takes the pacer, bounds the chunk by `SpliceChunkBytes`, charges **after** each copied chunk and tears the connection down when a charge is refused; `CopyRawConnIfExist` falls back to the buffered path when the session demands pacing and no pacer is reachable | `app/dispatcher/stats.go`, `common/session/session.go`, `proxy/proxy.go` | `app/dispatcher/splice_pacer_yue_test.go`, `common/session/session_yue_test.go`, `proxy/proxy_splice_test.go` (per-chunk charging, chunk clamp, fail-closed on refusal), `proxy/proxy_splice_linux_test.go` (real TCP: paced splice stays zero-copy, no-pacer falls back, uncapped keeps splice, refusal tears down) |
+| Asset-scoped geodata cache keys — `buildDomainRulesKey`, `CompactDomainMatcherFactory.getOrCreateFrom` and `buildGeoIPRulesKey` key on `platform.GetAssetLocation(file)` | `common/geodata/domain_matcher.go`, `common/geodata/ip_matcher.go` | `common/geodata/asset_scoped_cache_yue_test.go` (Mph, Compact and IPSet factories each built twice from two directories holding the same code; key stability and distinctness) |
+
+The compact (ios/android) factory's per-rule cache had the same bare
+`file:code` key and is fixed here too; the vendor-only patch had covered only
+the Mph and IPSet caches the Linux fleet actually uses.
+
+Every listed test was mutation-checked: reverting the key change turns all
+four geodata tests red, and disabling the `RequiresSplicePacing` branch turns
+`TestCopyRawConnIfExistFallsBackToBufferedWhenNoPacerIsReachable` red on Linux.
+The Linux tests run in `golang:1.27.1` (`go test -race ./proxy …`); on darwin
+they compile out, so a green darwin run proves nothing about the splice path.
+
+The pacer itself (token bucket, chunk size, wait budget, metrics) stays in
+`yue-node`; the fork only owns the seam and the fail-closed rule.
 
 ## Changes deliberately not replayed
 
