@@ -11,7 +11,7 @@ deployed revision are owned by that repository and the deployment pipeline.
 - Latest canonical prerelease (checked 2026-09-14):
   [`v26.9.9`](https://github.com/XTLS/Xray-core/releases/tag/v26.9.9).
 - Exact base commit: `c412e77a9b712082ac9ebf27fa793951cb5a7d85` — `upstream/main`,
-  rebased 2026-09-14 (tags `v26.9.14-yue.1`, `v26.9.14-yue.2`). It is `v26.9.9` plus two commits (`ccb69ea5` Windows
+  rebased 2026-09-14 (tags `v26.9.14-yue.1`, `v26.9.14-yue.2`, `v26.9.16-yue.1`). It is `v26.9.9` plus two commits (`ccb69ea5` Windows
   `readv` fix, `c412e77a` TUN inbound UDP destinations), neither of which is
   reachable from the Linux VLESS role.
 - Previous bases: `cd4ce973e9f6ef3a7acf9a7030927b4143f9ea47` (`upstream/main`,
@@ -39,7 +39,14 @@ Zero of the 17 commits touch `proxy/vless/` or `transport/internet/reality/`
 (verified with `git log cd4ce973..c412e77a -- proxy/vless transport/internet/reality`).
 The REALITY behaviour change lives entirely in the dependency bump.
 
-### Deliberately held back: `github.com/xtls/reality` stays at `20260322125925-9234c772ba8f`
+### Deliberately held back: `github.com/xtls/reality` stays below `8cdf7bf9`
+
+Held at `20260908045812-e1986a4d31ca` since `v26.9.16-yue.1` (previously
+`20260322125925-9234c772ba8f`). Upstream `main` between the two is exactly
+`9234c772 → 393f8de3 → e1986a4d → 8cdf7bf9 → 5dabb073`, so the hold now takes
+the two fixes that sit before the MLKEM enforcement and nothing else — see
+"v26.9.16-yue.1" below. The classical-hello measurement that follows was taken
+on `20260322`; `reality_yue_keyshare_test.go` re-proves it on `e1986a4d`.
 
 Upstream `47cfe999` moves the module to `20260908062103-8cdf7bf9c7f0`, which
 includes "REALITY protocol: Reject outdated/strange Client Hello that doesn't
@@ -56,9 +63,10 @@ sets `support-x25519mlkem768: true`, and the panel's subscription templates do
 not emit that key, so the upstream revision would lock every default-configured
 YueLink/Clash-family client out of every REALITY node.
 `transport/internet/reality/reality_yue_keyshare_test.go` pins the kept
-behaviour and goes red on a silent re-bump. Cost of holding back: the 20260908
-fixes (17 KiB target record buffer, `DetectPostHandshakeRecordsLens`
-panic/leak/race, Go 1.27 sync). Retire the hold once the subscription
+behaviour and goes red on a silent re-bump. Cost of holding back, since
+`v26.9.16-yue.1`: only upstream `5dabb073` (Go 1.27 sync) — the 17 KiB target
+record buffer and the `DetectPostHandshakeRecordsLens` panic/leak/race fixes
+are now taken. Retire the hold once the subscription
 templates emit the MLKEM flag for every mihomo-family client, YueLink ships a
 core that sends X25519MLKEM768 first, and a real-client canary passes.
 
@@ -134,6 +142,26 @@ by the production VLESS role:
 8. Geodata matcher caches keyed on the resolved asset path, so several embedded
    instances with different `xray.location.asset` directories never share a
    `geosite.dat:CODE` / `geoip.dat:CODE` entry (see below).
+
+### v26.9.16-yue.1 (2026-09-16): REALITY probe crash/leak/race fixes within the hold
+
+Same base `c412e77a` and the same Yue patches as `v26.9.14-yue.2`. The only
+change is `github.com/xtls/reality` `20260322125925-9234c772ba8f` →
+`20260908045812-e1986a4d31ca`, an upstream commit — no hand patch, no reality
+fork. It is a strict descendant of the old hold and a strict ancestor of the
+MLKEM enforcement `8cdf7bf9`; the diff is two upstream commits in two files:
+
+| Upstream commit | Change |
+|---|---|
+| `393f8de3` (#33) | Target TLS record buffer `8192` → `17 * 1024` (Xray-core #6356) |
+| `e1986a4d` (#36) | `DetectPostHandshakeRecordsLens`: bound check before `data = data[length:]` (a destination record whose declared length exceeds the bytes read panicked the background probe that `transport/internet/tcp/hub.go` starts with a bare `go` — no recover, the whole process exits); `defer target.Close()` on both probe connections (leaked one fd per dest/SNI/ALPN on a failed handshake); CCS alert reader no longer assigns `Write`'s named return value (data race) |
+
+`transport/internet/reality/reality_yue_record_detect_test.go` pins all three:
+run against `20260322` the truncated-record test panics
+(`slice bounds out of range [16389:8]`), the probe-leak test sees 6 of 6
+connections never closed, and the CCS test reports `DATA RACE` under `-race`;
+all pass on `e1986a4d`. `reality_yue_keyshare_test.go` still authenticates every
+classical-X25519 preset.
 
 ### v26.9.14-yue.2 (2026-09-14): the last two vendor-only patches made native
 

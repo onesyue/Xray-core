@@ -31,8 +31,10 @@ import (
 // strips X25519MLKEM768 from its hello unless `support-x25519mlkem768: true`
 // is set per proxy, which the panel's subscriptions do not emit, so adopting
 // the newer reality revision would lock those clients out of every REALITY
-// node. go.mod therefore keeps reality at 20260322 until the client side is
-// proven; this test turns a silent bump into a red test.
+// node. go.mod therefore keeps reality below 8cdf7bf9 until the client side is
+// proven; this test turns a silent bump into a red test. Since v26.9.16-yue.1
+// the hold is upstream e1986a4d (20260908045812): 9234c772 plus exactly the two
+// commits before 8cdf7bf9 (17 KiB record buffer, probe panic/leak/race fixes).
 func TestRealityServerAcceptsClassicalX25519ClientHello(t *testing.T) {
 	const sni = "www.example.com"
 	destLn, err := gotls.Listen("tcp", "127.0.0.1:0", &gotls.Config{
