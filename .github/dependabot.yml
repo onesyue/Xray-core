@@ -9,6 +9,13 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "daily"
+    ignore:
+      # Held strictly below 8cdf7bf9 (20260908062103), which rejects every
+      # ClientHello without an X25519MLKEM768 key share and would lock out
+      # default-configured clients. See yue-node fork-ledger.yaml,
+      # reality-classical-keyshare-hold. Moving it is a deliberate decision,
+      # never a bot PR.
+      - dependency-name: "github.com/xtls/reality"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
