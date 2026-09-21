@@ -35,6 +35,9 @@ import (
 // proven; this test turns a silent bump into a red test. Since v26.9.16-yue.1
 // the hold is upstream e1986a4d (20260908045812): 9234c772 plus exactly the two
 // commits before 8cdf7bf9 (17 KiB record buffer, probe panic/leak/race fixes).
+// Since v26.9.16-yue.3 reality is replaced by github.com/onesyue/REALITY
+// (upstream 3c98159 with only the 8cdf7bf9 key-share check reverted); this test
+// is what proves that revert: all three classical presets fail on 3c98159.
 func TestRealityServerAcceptsClassicalX25519ClientHello(t *testing.T) {
 	const sni = "www.example.com"
 	destLn, err := gotls.Listen("tcp", "127.0.0.1:0", &gotls.Config{
