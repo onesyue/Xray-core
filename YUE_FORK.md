@@ -143,6 +143,30 @@ by the production VLESS role:
    instances with different `xray.location.asset` directories never share a
    `geosite.dat:CODE` / `geoip.dat:CODE` entry (see below).
 
+### v26.9.16-yue.3 (2026-09-21): REALITY takes upstream's Go 1.27 TLS sync via an onesyue/REALITY fork
+
+The hold below `8cdf7bf9` also held back upstream REALITY `3c98159` (#30,
+"Sync upstream Go 1.27+"), which brings the crypto/tls security fixes the
+vendored copy lacked (e.g. rejecting a read-traffic-secret change while
+handshake bytes are still buffered, and the KeyUpdate ordering). #30 sits after
+the MLKEM enforcement, so it cannot be taken as an upstream revision.
+
+`go.mod` now requires upstream `v0.0.0-20260921001439-3c98159dee38` and
+replaces it with `github.com/onesyue/REALITY v0.0.0-yue.2` (commit
+`08e997a6`, signed tag): upstream `3c98159` plus exactly one hunk in `tls.go`
+that restores the pre-`8cdf7bf9` key-share selection, byte-identical to
+`e1986a4d` (prefer a classical X25519 share, else the X25519 half of
+X25519MLKEM768). `reality_yue_keyshare_test.go` authenticates `chrome`
+(MLKEM+X25519) and the classical `hellochrome_120` / `hellofirefox_120` / `ios`
+presets on it; against unmodified `3c98159` the three classical presets fail.
+`reality_yue_record_detect_test.go` still passes (the #36 fixes are upstream
+ancestors of `3c98159`). `v0.0.0-yue.1` of that fork exists but was signed with
+an unverifiable tagger email; it is never consumed.
+
+Also in this tag: upstream `dbb1ea30` (WireGuard netTun close with a write in
+flight panicked the process) with a regression test, and a dependabot ignore
+for `github.com/xtls/reality`.
+
 ### v26.9.16-yue.1 (2026-09-16): REALITY probe crash/leak/race fixes within the hold
 
 Same base `c412e77a` and the same Yue patches as `v26.9.14-yue.2`. The only
