@@ -62,4 +62,4 @@ require (
 	gvisor.dev/gvisor v0.0.0-20260122175437-89a5d21be8f0 // indirect
 )
 
-replace github.com/xtls/reality => github.com/onesyue/REALITY v0.0.0-yue.2
+replace github.com/xtls/reality => github.com/onesyue/REALITY v0.0.0-yue.3
