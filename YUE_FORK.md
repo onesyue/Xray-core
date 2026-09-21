@@ -143,6 +143,40 @@ by the production VLESS role:
    instances with different `xray.location.asset` directories never share a
    `geosite.dat:CODE` / `geoip.dat:CODE` entry (see below).
 
+### v26.9.16-yue.4 (2026-09-22): REALITY Conn input buffers back to the Go 1.27.1 layout
+
+`v0.0.0-yue.2` crashed production: yue-node `743c0876` (built on
+`v26.9.16-yue.3`) killed the canary Reality slot with `fatal error: fault`
+about 10s after start and the roll aborted. Upstream REALITY #30 had synced
+`Conn` *ahead* of the Go 1.27.1 standard library: `rawInput` and `hand` became
+`*bytes.Buffer` backed by `rawInputPool` / `handPool` (plus `smallInput`,
+`maxIdleInputCap`, `handBuf` / `handLen` / `releaseHand`). VLESS Vision
+(`proxy/vless/inbound` and `outbound`) looks up `input` / `rawInput` by
+reflect and casts `p + Offset` to `*bytes.Reader` / `*bytes.Buffer` through
+`unsafe.Pointer`, so it read a pointer word as a `bytes.Buffer`. Upstream
+Xray-core never adopted #30 (it still pins reality `8cdf7bf9`).
+
+`replace` now points at `github.com/onesyue/REALITY v0.0.0-yue.3`
+(commit `7bac04da`, signed, GitHub-verified): `yue.2` with
+those `Conn` fields and `readFromUntil` restored field-for-field to go1.27.1
+`crypto/tls/conn.go` (`rawInput bytes.Buffer`, `input bytes.Reader`,
+`hand bytes.Buffer`, no pools). The rest of #30 and the classical key-share
+revert are unchanged. `v0.0.0-yue.2` must never be consumed again.
+
+Two tests close the gap that let it ship:
+
+- `proxy/vless/xtls_unsafe_layout_test.go` asserts `input` is `bytes.Reader`
+  and `rawInput` is `bytes.Buffer` (by value, and present) on every type the
+  unsafe cast targets: `reality.Conn`, `crypto/tls.Conn`, `utls.Conn`,
+  `encryption.CommonConn`. Fails on `yue.2`.
+- `testing/scenarios/vless_reality_vision_inprocess_test.go` runs a VLESS +
+  `xtls-rprx-vision` + REALITY server and client in-process against a local
+  TLS 1.3 REALITY dest (no Internet), proxies TLS 1.3 echo traffic so Vision
+  really switches to direct copy (asserted by counting `CopyRawConn` log
+  records, >= 1 per connection) and drains `input` / `rawInput` on both sides.
+  Passes on `yue.3`; on `yue.2` every tunnelled connection hangs until the
+  deadline and the test fails.
+
 ### v26.9.16-yue.3 (2026-09-21): REALITY takes upstream's Go 1.27 TLS sync via an onesyue/REALITY fork
 
 The hold below `8cdf7bf9` also held back upstream REALITY `3c98159` (#30,
