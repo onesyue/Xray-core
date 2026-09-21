@@ -64,4 +64,4 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-replace github.com/xtls/reality => github.com/onesyue/REALITY v0.0.0-yue.2
+replace github.com/xtls/reality => github.com/onesyue/REALITY v0.0.0-yue.3

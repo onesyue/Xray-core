@@ -52,8 +52,8 @@ github.com/libp2p/go-netroute v0.2.1 h1:V8kVrpD8GK0Riv15/7VN6RbUQ3URNZVosw7H2v9t
 github.com/libp2p/go-netroute v0.2.1/go.mod h1:hraioZr0fhBjG0ZRXJJ6Zj2IVEVNx6tDTFQfSmcq7mQ=
 github.com/miekg/dns v1.1.73 h1:uhT8nJxmTrPJYClxVxTCX+CVn6qnzSiybRk72Z6DgrE=
 github.com/miekg/dns v1.1.73/go.mod h1:RW2Obtfd5NZHvOFe3zYG0W8koWOQtAzyHaLo8vASBuQ=
-github.com/onesyue/REALITY v0.0.0-yue.2 h1:JU9HYZMeKyhbhzAz54GTbU0d0sNlRI21IRukJSJGZ6U=
-github.com/onesyue/REALITY v0.0.0-yue.2/go.mod h1:/YQ6FwmAtkDuo8K3ujKQH1Br5eGNFauBipdl1gdiebk=
+github.com/onesyue/REALITY v0.0.0-yue.3 h1:ZWXIqKlgeKOScYpMdrMQV0rU6QagyuF5Txt+mtjHBuM=
+github.com/onesyue/REALITY v0.0.0-yue.3/go.mod h1:/YQ6FwmAtkDuo8K3ujKQH1Br5eGNFauBipdl1gdiebk=
 github.com/pelletier/go-toml v1.9.5 h1:4yBQzkHv+7BHq2PQUZF3Mx0IYxG7LsP222s7Agd3ve8=
 github.com/pelletier/go-toml v1.9.5/go.mod h1:u1nR/EPcESfeI/szUZKdtJ0xRNbUoANCkoOuaOx1Y+c=
 github.com/phayes/freeport v0.0.0-20180830031419-95f893ade6f2 h1:JhzVVoYvbOACxoUmOs6V/G4D5nPVUW73rKvXxP4XUJc=
