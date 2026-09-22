@@ -262,29 +262,35 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 			fallthrough // let server break Mux connections that contain TCP requests
 		case protocol.RequestCommandTCP, protocol.RequestCommandRvs:
 			var t reflect.Type
-			var p uintptr
+			var p unsafe.Pointer
 			if commonConn, ok := conn.(*encryption.CommonConn); ok {
 				if _, ok := commonConn.Conn.(*encryption.XorConn); ok || !proxy.IsRAWTransportWithoutSecurity(iConn) {
 					ob.CanSpliceCopy = 3 // full-random xorConn / non-RAW transport / another securityConn should not be penetrated
 				}
 				t = reflect.TypeOf(commonConn).Elem()
-				p = uintptr(unsafe.Pointer(commonConn))
+				p = unsafe.Pointer(commonConn)
 			} else if tlsConn, ok := iConn.(*tls.Conn); ok {
 				t = reflect.TypeOf(tlsConn.Conn).Elem()
-				p = uintptr(unsafe.Pointer(tlsConn.Conn))
+				p = unsafe.Pointer(tlsConn.Conn)
 			} else if utlsConn, ok := iConn.(*tls.UConn); ok {
 				t = reflect.TypeOf(utlsConn.Conn).Elem()
-				p = uintptr(unsafe.Pointer(utlsConn.Conn))
+				p = unsafe.Pointer(utlsConn.Conn)
 			} else if realityConn, ok := iConn.(*reality.UConn); ok {
 				t = reflect.TypeOf(realityConn.Conn).Elem()
-				p = uintptr(unsafe.Pointer(realityConn.Conn))
+				p = unsafe.Pointer(realityConn.Conn)
 			} else {
 				return errors.New("XTLS only supports TLS and REALITY directly for now.").AtWarning()
 			}
-			i, _ := t.FieldByName("input")
-			r, _ := t.FieldByName("rawInput")
-			input = (*bytes.Reader)(unsafe.Pointer(p + i.Offset))
-			rawInput = (*bytes.Buffer)(unsafe.Pointer(p + r.Offset))
+			i, inputOK := t.FieldByName("input")
+			r, rawInputOK := t.FieldByName("rawInput")
+			// Preserve a GC-visible pointer throughout the offset calculation.
+			// A stored uintptr is not a root, and fails checkptr even when the
+			// field layout matches. Refuse incompatible future TLS layouts.
+			if !inputOK || !rawInputOK || i.Type != reflect.TypeFor[bytes.Reader]() || r.Type != reflect.TypeFor[bytes.Buffer]() {
+				return errors.New("XTLS incompatible TLS input buffer layout").AtError()
+			}
+			input = (*bytes.Reader)(unsafe.Add(p, i.Offset))
+			rawInput = (*bytes.Buffer)(unsafe.Add(p, r.Offset))
 		default:
 			panic("unknown VLESS request command")
 		}
