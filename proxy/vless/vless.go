@@ -7,10 +7,10 @@ package vless
 
 import (
 	"bytes"
+	"errors"
 	"net"
 	"reflect"
-
-	"github.com/xtls/xray-core/common/utils"
+	"unsafe"
 )
 
 const (
@@ -18,15 +18,37 @@ const (
 	XRV  = "xtls-rprx-vision"
 )
 
-// Old TLS lib holds bytes.Buffer, but new TLS lib holds *bytes.Buffer
-// Since Xray has 3 TLS libraries (std, utls, REALITY server)
-// we detect the type of rawInput and return the appropriate pointer
-func AccessTLSBuffers(conn net.Conn) (*bytes.Reader, **bytes.Buffer) {
-	input := utils.AccessField[bytes.Reader](conn, "input")
-	field := reflect.ValueOf(conn).Elem().FieldByName("rawInput")
-	if field.Kind() == reflect.Pointer {
-		return input, utils.AccessField[*bytes.Buffer](conn, "rawInput")
+// AccessTLSBuffers returns the unexported TLS input buffers Vision drains when
+// it switches a direction to direct copy.
+//
+// Go 1.27.1 (and onesyue/REALITY v0.0.0-yue.3, utls, CommonConn) store rawInput
+// as a bytes.Buffer by value. Go 1.27.3+ crypto/tls stores *bytes.Buffer.
+// Upstream #7176 detects which one is present. The address is taken with
+// unsafe.Pointer(field.UnsafeAddr()) in this expression: reflect marks
+// UnsafeAddr nocheckptr so the compiler accepts that conversion, and the
+// uintptr is never stored. A stored uintptr is not a GC root and fails
+// checkptr under -race. An incompatible layout returns an error instead of
+// panicking or casting an unrelated offset.
+func AccessTLSBuffers(conn net.Conn) (*bytes.Reader, **bytes.Buffer, error) {
+	rv := reflect.ValueOf(conn)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
+		return nil, nil, errors.New("XTLS incompatible TLS input buffer layout")
 	}
-	raw := utils.AccessField[bytes.Buffer](conn, "rawInput")
-	return input, &raw
+	elem := rv.Elem()
+	inputField := elem.FieldByName("input")
+	rawField := elem.FieldByName("rawInput")
+	if !inputField.IsValid() || !rawField.IsValid() || !inputField.CanAddr() || !rawField.CanAddr() ||
+		inputField.Type() != reflect.TypeFor[bytes.Reader]() {
+		return nil, nil, errors.New("XTLS incompatible TLS input buffer layout")
+	}
+	input := (*bytes.Reader)(unsafe.Pointer(inputField.UnsafeAddr()))
+	switch rawField.Type() {
+	case reflect.TypeFor[*bytes.Buffer]():
+		return input, (**bytes.Buffer)(unsafe.Pointer(rawField.UnsafeAddr())), nil
+	case reflect.TypeFor[bytes.Buffer]():
+		raw := (*bytes.Buffer)(unsafe.Pointer(rawField.UnsafeAddr()))
+		return input, &raw, nil
+	default:
+		return nil, nil, errors.New("XTLS incompatible TLS input buffer layout")
+	}
 }

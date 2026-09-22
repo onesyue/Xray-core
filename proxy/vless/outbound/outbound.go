@@ -274,7 +274,11 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 			} else {
 				return errors.New("XTLS only supports TLS and REALITY directly for now.")
 			}
-			input, rawInput = vless.AccessTLSBuffers(target)
+			var accessErr error
+			input, rawInput, accessErr = vless.AccessTLSBuffers(target)
+			if accessErr != nil {
+				return accessErr
+			}
 		default:
 			panic("unknown VLESS request command")
 		}

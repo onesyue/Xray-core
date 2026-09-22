@@ -574,7 +574,11 @@ func (h *Handler) Process(ctx context.Context, network net.Network, connection s
 				} else {
 					return errors.New("XTLS only supports TLS and REALITY directly for now.")
 				}
-				input, rawInput = vless.AccessTLSBuffers(target)
+				var accessErr error
+				input, rawInput, accessErr = vless.AccessTLSBuffers(target)
+				if accessErr != nil {
+					return accessErr
+				}
 			}
 		} else {
 			return errors.New("account " + account.ID.String() + " is not able to use the flow " + requestAddons.Flow)

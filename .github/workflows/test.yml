@@ -124,3 +124,5 @@ jobs:
           }
       - name: Test
         run: go test -timeout 1h -v ./...
+      - name: Test Vision REALITY with race and pointer checks
+        run: go test -race -count=1 -timeout 5m -run "^TestVlessVisionRealityInProcessDirectCopy$" ./testing/scenarios

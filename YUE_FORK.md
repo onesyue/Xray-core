@@ -302,3 +302,22 @@ consumer dependency graph contains none of these packages:
 
 Do not change the `yue-node` pin until its migration checklist, both profile
 test suites, limiter overload tests, and a VLESS canary all pass.
+
+## Vision pointer lifetime and race coverage (2026-09-22)
+
+`v26.9.22-yue.1` retains the same REALITY `v0.0.0-yue.3` and upstream base.
+Both VLESS directions now keep the connection as `unsafe.Pointer` and use
+`unsafe.Add` for field offsets. The inherited code stored a pointer in a
+`uintptr` across reflection calls, which loses the GC-visible reference and
+fails Go's pointer arithmetic rules: the existing in-process Vision/REALITY
+round trip immediately failed with `fatal error: checkptr` under `-race`.
+Field presence and exact value types are checked before either cast, so a
+future incompatible TLS layout returns an error rather than dereferencing
+unrelated memory. The existing layout regression still validates all four
+connection types. See https://pkg.go.dev/unsafe#Pointer .
+
+The three-platform workflow now separately runs the in-process Vision/REALITY
+end-to-end case under `-race`, including checkptr. It transfers TLS payloads
+through real local REALITY and VLESS connections and asserts the raw-copy path
+was reached; no Internet, external probe target, or disabled pointer checking
+is required.
