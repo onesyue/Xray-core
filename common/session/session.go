@@ -68,6 +68,12 @@ type Inbound struct {
 	// is set and no pacer is found, the copy falls back to the buffered path:
 	// serving an unmetered ceiling is worse than losing the zero-copy win.
 	RequiresSplicePacing bool
+	// RequestAddonsUnknown holds the unknown fields of the VLESS request
+	// addons exactly as the client sent them (nil when there were none). The
+	// embedding application parses its own extensions from it — yue-node reads
+	// a connection-level device tag from field 2026. Xray never interprets it,
+	// and a malformed or absent value must never fail the connection.
+	RequestAddonsUnknown []byte
 }
 
 // Outbound is the metadata of an outbound connection.
