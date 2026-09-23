@@ -536,6 +536,10 @@ func (h *Handler) Process(ctx context.Context, network net.Network, connection s
 	inbound.Name = "vless"
 	inbound.User = request.User
 	inbound.VlessRoute = net.PortFromBytes(userSentID[6:8])
+	// Unknown addons fields are handed to the embedder untouched (see
+	// session.Inbound.RequestAddonsUnknown); protobuf already copied them out of
+	// the reused header buffer during Unmarshal.
+	inbound.RequestAddonsUnknown = requestAddons.ProtoReflect().GetUnknown()
 
 	account := request.User.Account.(*vless.MemoryAccount)
 
