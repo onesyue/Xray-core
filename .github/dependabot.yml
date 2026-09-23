@@ -9,6 +9,9 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "daily"
+    # 供应链冷却：新版本发布满 3 天才开 PR，给被投毒版本留出下架窗口（安全更新不受此限）。
+    cooldown:
+      default-days: 3
     ignore:
       # Held strictly below 8cdf7bf9 (20260908062103), which rejects every
       # ClientHello without an X25519MLKEM768 key share and would lock out
@@ -20,3 +23,6 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    # 供应链冷却：Actions 以可重指的 tag 分发，冷却更长（安全更新不受此限）。
+    cooldown:
+      default-days: 7
