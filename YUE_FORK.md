@@ -142,6 +142,21 @@ by the production VLESS role:
 8. Geodata matcher caches keyed on the resolved asset path, so several embedded
    instances with different `xray.location.asset` directories never share a
    `geosite.dat:CODE` / `geoip.dat:CODE` entry (see below).
+9. `session.Inbound.RequestAddonsUnknown`: the VLESS request addons' unknown
+   protobuf fields handed to the embedder verbatim (see `v26.9.22-yue.2`).
+
+### v26.9.22-yue.2 (2026-09-23): VLESS request-addons unknown fields reach the embedder
+
+One commit on `v26.9.22-yue.1` (`0754497b`), same upstream base and same
+REALITY `v0.0.0-yue.3`. `proxy/vless/inbound` copies the request addons'
+unknown protobuf fields into `session.Inbound.RequestAddonsUnknown` (nil when
+there are none). Xray never interprets them; yue-node reads a connection-level
+device tag from field 2026 and treats anything absent or malformed as no tag,
+so a connection is never refused because of it. protobuf copies unknown bytes
+during `Unmarshal`, so the slice does not alias the reused header buffer —
+`proxy/vless/encoding/addons_unknown_yue_test.go` pins both the round trip and
+the non-aliasing. Retire it if upstream grows a first-class addons extension
+API that carries arbitrary fields.
 
 ### v26.9.16-yue.4 (2026-09-22): REALITY Conn input buffers back to the Go 1.27.1 layout
 
