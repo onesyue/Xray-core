@@ -70,6 +70,16 @@ are now taken. Retire the hold once the subscription
 templates emit the MLKEM flag for every mihomo-family client, YueLink ships a
 core that sends X25519MLKEM768 first, and a real-client canary passes.
 
+2026-09-27 re-check against upstream sources widened the retirement condition:
+YueLink alone is not enough. sing-box (SFA/SFI/SFM, Hiddify, NekoBox) still
+drops MLKEM from its Chrome fingerprint (SagerNet/sing-box#4520, open) and
+Shadowrocket 2.2.92 does the same (Shadowrocket/config#4, open); mihomo keeps
+`support-x25519mlkem768` default-false and has declined to follow xray
+v26.7.11+. Enforcing MLKEM would lock all of those users out. Retire the hold
+only after **all three** families send X25519MLKEM768 by default (both issues
+closed with a released fix, mihomo default flipped) *and* a real-client canary
+per family passes.
+
 ### Previous rebase: 2026-09-04 onto `cd4ce973` (history, kept for the audit chain)
 
 The base is the 2026-09-04 `main` snapshot, **not** the `v26.7.28` tag. At that
