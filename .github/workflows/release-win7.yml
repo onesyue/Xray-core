@@ -54,53 +54,10 @@ jobs:
           echo "available=true" >> "$GITHUB_OUTPUT"
 
   check-assets:
-    runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
-    steps:
-      - name: Restore Geodat Cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: resources
-          key: xray-geodat-
-
-      - name: Restore Wintun Cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: resources
-          key: xray-wintun-
-
-      - name: Check Assets Existence
-        id: check-assets
-        run: |
-          [ -d 'resources' ] || mkdir resources
-          LIST=('geoip.dat' 'geosite.dat')
-          for FILE_NAME in "${LIST[@]}"
-          do
-            echo -e "Checking ${FILE_NAME}..."
-            if [ -s "./resources/${FILE_NAME}" ]; then
-              echo -e "${FILE_NAME} exists."
-            else
-              echo -e "${FILE_NAME} does not exist."
-              echo "missing=true" >> "$GITHUB_OUTPUT"
-              break
-            fi
-          done
-          LIST=('amd64' 'x86')
-          for ARCHITECTURE in "${LIST[@]}"
-          do
-            echo -e "Checking wintun.dll for ${ARCHITECTURE}..."
-            if [ -s "./resources/wintun/bin/${ARCHITECTURE}/wintun.dll" ]; then
-              echo -e "wintun.dll for ${ARCHITECTURE} exists."
-            else
-              echo -e "wintun.dll for ${ARCHITECTURE} is missing."
-              echo "missing=true" >> "$GITHUB_OUTPUT"
-              break
-            fi
-          done
-
-      - name: Sleep for 90 seconds if Assets Missing
-        if: steps.check-assets.outputs.missing == 'true'
-        run: sleep 90
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-assets.yml
 
   build:
     needs: [check-assets, verify-win7-toolchain]
@@ -176,20 +133,18 @@ jobs:
           # The line below is for without running conhost.exe version. Commented for not being used. Provided for reference.
           # go build -o build_assets/wxray.exe -trimpath -buildvcs=false -gcflags="all=-l=4" -ldflags="-H windowsgui -X github.com/xtls/xray-core/core.build=${COMMID} -s -w -buildid=" -v ./main
 
-      - name: Restore Geodat Cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Download verified release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          name: xray-release-assets-${{ github.sha }}
           path: resources
-          key: xray-geodat-
 
-      - name: Restore Wintun Cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: resources
-          key: xray-wintun-
+      - name: Verify release assets
+        run: (cd resources && sha256sum --check --strict ASSET_SUMS)
 
       - name: Add additional assets into package
         run: |
+          cp resources/ASSET_SUMS resources/ASSET_SOURCE build_assets/
           mv -f resources/geo* build_assets/
           if [[ ${GOOS} == 'windows' ]]; then
             cp .github/build/windows/* build_assets/
