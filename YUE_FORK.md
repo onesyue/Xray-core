@@ -155,6 +155,47 @@ by the production VLESS role:
 9. `session.Inbound.RequestAddonsUnknown`: the VLESS request addons' unknown
    protobuf fields handed to the embedder verbatim (see `v26.9.22-yue.2`).
 
+### v26.9.22-yue.3 (2026-10-04, candidate): Vision no longer writes close_notify after direct copy
+
+Same upstream base `c412e77a` and same REALITY `v0.0.0-yue.3`; no rebase and
+no dependency change (grpc stays 1.83.2). One exact cherry-pick of upstream
+[`e5e85ca9` / #6834](https://github.com/XTLS/Xray-core/commit/e5e85ca9dada936ae736197ad2b7a685972e8e0f)
+(first released in upstream `v26.9.30`) plus Yue regression tests.
+
+Defect: once Vision switches a direction to direct copy, plaintext goes onto the
+raw socket and the outer TLS/REALITY record state no longer matches the peer.
+Closing the outer conn still sent an encrypted close_notify under the abandoned
+keys, which the client's browser/TLS stack reports as `bad_record_mac`. The
+patch adds `proxy.SuppressOuterCloseNotify` at both Vision switch points
+(`VisionReader` and `VisionWriter`), and `SuppressCloseNotify` / a raw-socket
+`Close` on `tls.Conn`, `tls.UConn`, `reality.Conn` and `reality.UConn`.
+
+The only change to `reality.Conn` / `reality.UConn` is on the **outer xray
+wrapper**; the `github.com/xtls/reality.Conn` and `utls.Conn` structs whose
+`input` / `rawInput` offsets Vision reads through `unsafe` are untouched, and
+`TestXTLSUnsafeFieldLayout` stays green.
+
+Paced splice is covered without an extra call: `CopyRawConnIfExist` (including
+the `SplicePacer` / `RequiresSplicePacing` path) only splices when
+`inbound.CanSpliceCopy == 1`, which is set only inside the `VisionWriter`
+switch, after `SuppressOuterCloseNotify`; the read side enters it from
+`XtlsRead` only after `VisionReader` has taken its switch (and suppressed) in
+the same goroutine. Fail-closed fallbacks to `readV` change nothing here.
+
+Regression tests (mutation-checked: removing the two `SuppressOuterCloseNotify`
+calls, or the `Close` override in `reality.go`, turns them red with "wrote 24
+bytes"):
+
+- `proxy/vision_close_notify_yue_test.go` — real crypto/tls handshake over
+  loopback TCP behind the stats wrapper; the real `VisionWriter` and
+  `VisionReader` switches, then `Close`, must write 0 bytes to the raw socket
+  (control case without a switch writes the alert).
+- `transport/internet/reality/reality_yue_closenotify_test.go` — real REALITY
+  server (`reality.Conn`) and client (`reality.UConn`) handshake; same 0-byte
+  assertion after `proxy.SuppressOuterCloseNotify`, with controls.
+
+Retire with the next rebase onto an upstream base that contains `e5e85ca9`.
+
 ### v26.9.22-yue.2 (2026-09-23): VLESS request-addons unknown fields reach the embedder
 
 One commit on `v26.9.22-yue.1` (`0754497b`), same upstream base and same
