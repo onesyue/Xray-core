@@ -874,13 +874,16 @@ type readFromWriter interface {
 // would have already spent the difference. The cost of paying afterwards is a
 // bounded overshoot of at most one chunk, which SpliceChunkBytes sizes.
 func copyRawConnCounted(ctx context.Context, dst readFromWriter, src io.Reader, pacer dispatcher.SplicePacer, onChunk func(int64)) error {
-	chunk := int64(rawCopyAccountingChunk)
-	if pacer != nil {
-		if n := pacer.SpliceChunkBytes(); n > 0 && int64(n) < chunk {
-			chunk = int64(n)
-		}
-	}
 	for {
+		// The pacer can be retuned without reconnecting. Refresh its bound
+		// before each copy: retaining the initial unlimited 1 MiB chunk would
+		// keep overshooting a later low ceiling by that entire chunk.
+		chunk := int64(rawCopyAccountingChunk)
+		if pacer != nil {
+			if n := pacer.SpliceChunkBytes(); n > 0 && int64(n) < chunk {
+				chunk = int64(n)
+			}
+		}
 		limited := &io.LimitedReader{R: src, N: chunk}
 		written, err := dst.ReadFrom(limited)
 		if written > 0 {
