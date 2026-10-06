@@ -39,6 +39,43 @@ func TestCopyRawConnCountedAcceptsEmptySource(t *testing.T) {
 	}
 }
 
+func TestCopyRawConnCountedRefreshesRetunedChunkOnExistingCopy(t *testing.T) {
+	want := []int{rawCopyAccountingChunk, 64 << 10, 256 << 10, rawCopyAccountingChunk, 17}
+	total := 0
+	for _, n := range want {
+		total += n
+	}
+	payload := bytes.Repeat([]byte{0x7c}, total)
+	var dst bytes.Buffer
+	pacer := &recordingPacer{chunk: rawCopyAccountingChunk, dst: &dst, failAt: -1}
+	var reported []int64
+	err := copyRawConnCounted(context.Background(), &dst, bytes.NewReader(payload), pacer, func(n int64) {
+		reported = append(reported, n)
+		switch len(reported) {
+		case 1:
+			pacer.chunk = 64 << 10 // unlimited connection becomes rate-limited
+		case 2:
+			pacer.chunk = 256 << 10 // its fair share grows again
+		case 3:
+			pacer.chunk = 0 // restore the default accounting bound
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pacer.charges) != len(want) {
+		t.Fatalf("retuned copy charges = %v, want %v", pacer.charges, want)
+	}
+	for i, n := range want {
+		if pacer.charges[i] != n || reported[i] != int64(n) {
+			t.Fatalf("chunk %d: charged %d, reported %d, want %d", i, pacer.charges[i], reported[i], n)
+		}
+	}
+	if !bytes.Equal(dst.Bytes(), payload) {
+		t.Fatal("retuning the chunk changed the copied payload")
+	}
+}
+
 // recordingPacer records every charge together with how many bytes the
 // destination already held when the charge arrived, which is what proves the
 // "pay after copy" contract rather than a budget reserved up front.
