@@ -3,7 +3,6 @@ package router
 import (
 	"time"
 
-	"github.com/xtls/xray-core/app/dns"
 	"github.com/xtls/xray-core/common"
 	"github.com/xtls/xray-core/common/errors"
 	"github.com/xtls/xray-core/common/geodata"
@@ -20,6 +19,9 @@ type scriptEngine struct {
 }
 
 func newScriptEngine(path string, router *Router) (*scriptEngine, error) {
+	if err := routingScriptSupported(); err != nil {
+		return nil, err
+	}
 	program, err := xlua.CompileFile(path)
 	if err != nil {
 		return nil, err
@@ -31,7 +33,7 @@ func newScriptEngine(path string, router *Router) (*scriptEngine, error) {
 			geodata.RegisterLua(L)
 			log.RegisterLua(L)
 			router.RegisterLua(L)
-			dns.RegisterLua(L, router.dns)
+			registerScriptDNS(L, router.dns)
 		},
 		func(L *lua.LState) error {
 			if L.GetGlobal("HandleRoute").Type() != lua.LTFunction {
