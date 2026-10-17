@@ -1,3 +1,5 @@
+//go:build !yue_profile_vless
+
 package router
 
 import (
