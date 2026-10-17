@@ -37,6 +37,16 @@ not replayed). Review it with
 | `df13c8d3`, `126cec24`, `bc4611d7`, `4447dfaf` (REALITY hold) | **Kept.** Upstream `v26.10.10` requires `xtls/reality 8cdf7bf9` (MLKEM-mandatory key share); the fork keeps `require ...3c98159dee38` + `replace => github.com/onesyue/REALITY v0.0.0-yue.3`, so the classical-X25519 hold and the go1.27.1 `Conn` input layout are unchanged. `TestRealityServerAcceptsClassicalX25519ClientHello`, `TestXTLSUnsafeFieldLayout` and `TestVlessVisionRealityInProcessDirectCopy` (also under `-race`/checkptr on Linux) pass. |
 | every other commit | **Kept** (applied without conflict). |
 
+New Yue patch in this rebase: upstream `8855145e` (Lua routing `script`)
+made `app/router` import `app/dns`, whose DoQ name server links
+`github.com/apernet/quic-go`, so yue-node's `check-profile-deps.sh` saw quic-go
+and `app/dns` in the VLESS role graph. `app/router/script_dns{,_vless}.go`
+move the `dns.RegisterLua` binding behind the profile tag; under
+`yue_profile_vless` a configured routing script is refused (yue-node never
+sets one). `script_dns_vless_test.go` asserts the refusal and that the VLESS
+`app/router` graph contains neither `app/dns` nor quic-go (mutation-checked:
+re-importing `app/dns` turns it red).
+
 Upstream changes in the VLESS/REALITY/splice paths in this range are only
 `e5e85ca9` (above) and `61cad5ec` (log severity calls). New upstream
 dependencies reach the VLESS profile graph: `github.com/yuin/gopher-lua` and
@@ -168,8 +178,9 @@ by the production VLESS role:
    wrapper discovery and bounded in-flight splice accounting.
 3. Listener drain APIs that stop accepting while retaining active sessions and
    protocol state until final close.
-4. `yue_profile_vless` dependency boundaries that exclude the QUIC sniffer and
-   Hysteria listener wiring from a VLESS-only build.
+4. `yue_profile_vless` dependency boundaries that exclude the QUIC sniffer,
+   Hysteria listener wiring and (since 2026-10-17) the routing-script DNS
+   binding from a VLESS-only build.
 5. Immutable, synchronized TLS certificate reload snapshots.
 6. Vision padding bounds that preserve a full payload instead of panicking or
    silently truncating it.
