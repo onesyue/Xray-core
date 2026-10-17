@@ -18,6 +18,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+
+# Least privilege (W8.2, 2026-10-17): read-only by default; jobs that publish widen it.
+permissions:
+  contents: read
+
 jobs:
   verify-win7-toolchain:
     runs-on: ubuntu-latest
@@ -102,6 +107,8 @@ jobs:
           check-latest: false
 
       - name: Setup patched builder
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           GOSDK="$(go env GOROOT)"
@@ -109,7 +116,7 @@ jobs:
           cd "$GOSDK"
           curl --fail --show-error --silent --location --proto '=https' --tlsv1.2 \
             --output go-for-win7-linux-amd64.zip \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
             "$WIN7_PATCHED_GO_ARCHIVE_URL"
           echo "$WIN7_PATCHED_GO_ARCHIVE_SHA256  go-for-win7-linux-amd64.zip" \
             | sha256sum --check --strict
