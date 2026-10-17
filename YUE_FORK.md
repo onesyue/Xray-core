@@ -10,13 +10,40 @@ deployed revision are owned by that repository and the deployment pipeline.
   [`v26.3.27`](https://github.com/XTLS/Xray-core/releases/tag/v26.3.27).
 - Latest canonical prerelease (checked 2026-09-14):
   [`v26.9.9`](https://github.com/XTLS/Xray-core/releases/tag/v26.9.9).
-- Exact base commit: `c412e77a9b712082ac9ebf27fa793951cb5a7d85` — `upstream/main`,
-  rebased 2026-09-14 (tags `v26.9.14-yue.1`, `v26.9.14-yue.2`, `v26.9.16-yue.1`). It is `v26.9.9` plus two commits (`ccb69ea5` Windows
-  `readv` fix, `c412e77a` TUN inbound UDP destinations), neither of which is
-  reachable from the Linux VLESS role.
-- Previous bases: `cd4ce973e9f6ef3a7acf9a7030927b4143f9ea47` (`upstream/main`,
+- Exact base commit: `701af60772cda123492f86e383e1fdba066614a9` — upstream
+  tag [`v26.10.10`](https://github.com/XTLS/Xray-core/releases/tag/v26.10.10),
+  rebased 2026-10-17 (branch `codex-f/xray-v26.10.10-20261017`; proposed tag
+  `v26.10.10-yue.1`, created by the release owner, never by the rebase lane).
+- Previous bases: `c412e77a9b712082ac9ebf27fa793951cb5a7d85` (`upstream/main`,
+  2026-09-14, tags `v26.9.14-yue.1` .. `v26.9.22-yue.4`);
+  `cd4ce973e9f6ef3a7acf9a7030927b4143f9ea47` (`upstream/main`,
   2026-09-04, tags `v26.9.4-yue.1` / `v26.9.11-yue.1`);
   `5ca6f4b7d4dc20a881d4330e498892697627ec0c` (= tag `v26.7.28`).
+
+### 2026-10-17 rebase onto `v26.10.10` (`c412e77a..701af607`, 57 upstream commits)
+
+The yue series was replayed with `git cherry-pick -x` along the first-parent
+line `c412e77a..v26.9.22-yue.4` (36 commits; the `08becf6c` reconnect merge is
+not replayed). Review it with
+`git range-diff c412e77a..v26.9.22-yue.4 v26.10.10..<branch>`.
+
+| Yue commit(s) | Disposition |
+|---|---|
+| `f73b333b` (cherry-pick of `e5e85ca9` / #6834) | **Dropped — upstream-equivalent.** Identical patch-id to `e5e85ca9`, an ancestor of `v26.10.10`. The fork's regression tests (`290f6c8d`: `proxy/vision_close_notify_yue_test.go`, `transport/internet/reality/reality_yue_closenotify_test.go`) are kept and pass on the upstream code. |
+| `d5f14b9a` (cherry-pick of `dbb1ea30` / #6778) | **Dropped — upstream-equivalent.** Identical patch-id to `dbb1ea30`, an ancestor of `v26.10.10`. `TestNetTunCloseWithWriteInFlightDoesNotPanic` (`eacb61d3`) is kept and passes. |
+| `bd121e3a` (header-free MPH table) | **Production hunk dropped — upstream-equivalent; test kept and adapted.** Upstream `2953d447` (#6821) and `6243d2a2` (#6867) rewrote `MphMatcherGroup` into an arena layout that removes the same per-rule slice/string headers; `matchergroup_mph.go` is now byte-identical to upstream. The differential guard `matchergroup_mph_compact_yue_test.go` still embeds the pre-2026-09-20 implementation and now compares upstream's table with it (Match values and order, MatchAny, retained-heap ratio <= 0.60): green on the committed `geosite.dat`. Adaptations: the reference carries its own `RollingHash`/`MemHash`/`PrimeRK` (no longer exported) and asserts the rule-count floor on itself. |
+| `b541e572` (asset-scoped geodata keys) | **Adapted.** Upstream renamed `CompactDomainMatcherFactory` to `CompactMphDomainMatcherFactory` (cache value `MphValueMatcher`) and still keys on the bare file name; the key change is reapplied there and the test constructs the renamed factory. |
+| `386d240e`, `9217a9bb` | **Adapted.** Upstream `61cad5ec` (#6796) removed `(*errors.Error).AtError()`; the four new error returns drop the call. No other change. |
+| `df13c8d3`, `126cec24`, `bc4611d7`, `4447dfaf` (REALITY hold) | **Kept.** Upstream `v26.10.10` requires `xtls/reality 8cdf7bf9` (MLKEM-mandatory key share); the fork keeps `require ...3c98159dee38` + `replace => github.com/onesyue/REALITY v0.0.0-yue.3`, so the classical-X25519 hold and the go1.27.1 `Conn` input layout are unchanged. `TestRealityServerAcceptsClassicalX25519ClientHello`, `TestXTLSUnsafeFieldLayout` and `TestVlessVisionRealityInProcessDirectCopy` (also under `-race`/checkptr on Linux) pass. |
+| every other commit | **Kept** (applied without conflict). |
+
+Upstream changes in the VLESS/REALITY/splice paths in this range are only
+`e5e85ca9` (above) and `61cad5ec` (log severity calls). New upstream
+dependencies reach the VLESS profile graph: `github.com/yuin/gopher-lua` and
+`layeh.com/gopher-luar` (Lua `script` for DNS/routing, `8855145e`, linked via
+`common/log`); they only execute when a config sets a script. `go mod tidy`
+would move `golang.org/x/crypto/x509roots/fallback` to a direct requirement;
+upstream `v26.10.10` has the same untidiness and it is left as upstream has it.
 
 The base requires the Go 1.27 line (`fd2ca748`); every builder in this
 fork's workflows and Dockerfiles is pinned to 1.27.1.
