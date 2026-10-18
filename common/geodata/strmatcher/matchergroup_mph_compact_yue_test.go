@@ -516,3 +516,26 @@ func TestMphCompactActuallyShrinksRetainedHeap(t *testing.T) {
 			ratio*100, compactionRatioCeiling*100)
 	}
 }
+
+// Repeated rules occur within real geosite categories. Both multi-value and
+// single-value arena paths must preserve the legacy Match sequence exactly.
+func TestMphCompactPreservesRepeatedAddValues(t *testing.T) {
+	for _, values := range [][]uint32{{7, 7}, {7, 9, 7}, {0, 0}} {
+		for _, kind := range []strmatcher.Type{strmatcher.Full, strmatcher.Domain} {
+			matcher, err := kind.New("duplicate.example")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var entries []patternEntry
+			for _, value := range values {
+				entries = append(entries, patternEntry{matcher: matcher, value: value})
+			}
+			legacy, current := feedLegacy(entries), feedCompact(entries)
+			for _, input := range []string{"duplicate.example", "child.duplicate.example", "absent.example"} {
+				if want, got := legacy.Match(input), current.Match(input); !reflect.DeepEqual(want, got) {
+					t.Fatalf("kind=%v values=%v input=%q: legacy=%v current=%v", kind, values, input, want, got)
+				}
+			}
+		}
+	}
+}

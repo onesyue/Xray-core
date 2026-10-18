@@ -142,6 +142,24 @@ func (g *MphMatcherGroup) writeRecords() []uint32 {
 		return cmp.Or(bytes.Compare(g.key(a), g.key(b)), cmp.Compare(a, b))
 	})
 
+	// The single-value representation also collapses repeated values. Keep it
+	// only when each pattern/kind pair occurs once; duplicates need counts in
+	// the arena even if every rule carries the same numeric value.
+	if !g.multi {
+		var kinds uint8
+		for i, index := range order {
+			if i == 0 || !bytes.Equal(g.key(order[i-1]), g.key(index)) {
+				kinds = 0
+			}
+			bit := uint8(1 << g.entries[index].kind)
+			if kinds&bit != 0 {
+				g.multi = true
+				break
+			}
+			kinds |= bit
+		}
+	}
+
 	size := len(g.buf) + len(g.entries) + 2
 	if g.multi {
 		size += 3 * len(g.entries)
@@ -156,9 +174,9 @@ func (g *MphMatcherGroup) writeRecords() []uint32 {
 		}
 		for ; i < len(order) && bytes.Equal(g.key(order[i]), k); i++ {
 			e := &g.entries[order[i]]
-			if !slices.Contains(vals[e.kind], e.value) {
-				vals[e.kind] = append(vals[e.kind], e.value)
-			}
+			// Preserve repeated Add calls and their value order, as the legacy
+			// matcher does. Production categories may repeat the same rule.
+			vals[e.kind] = append(vals[e.kind], e.value)
 		}
 		rec := uint32(len(arena))
 		if len(k) < 255 {
