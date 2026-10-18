@@ -20,6 +20,24 @@ deployed revision are owned by that repository and the deployment pipeline.
   2026-09-04, tags `v26.9.4-yue.1` / `v26.9.11-yue.1`);
   `5ca6f4b7d4dc20a881d4330e498892697627ec0c` (= tag `v26.7.28`).
 
+### 2026-10-18 production-corpus compatibility repair
+
+The original v26.10.10-yue.1 candidate failed strict legacy Match equivalence
+on the live jp-premium VLESS mount: geosite.dat SHA256
+`8474140bc89940897ee2b629be8fc92f34a496bd32e45829605d17715f4340d6`,
+11,205,406 bytes. Upstream's arena removed repeated values within the same
+pattern/kind; the earlier committed corpus did not expose those duplicates.
+Keep repeated Add values in order, including the single-numeric-value path.
+The original rebase observation below is historical, not current acceptance.
+
+The full strmatcher package passes with race detection on that production
+corpus: 1,552 categories, 523,543 Full/Domain entries, 340,839 unique patterns,
+1,326,319 queries and 1,244,365 hits. Retained heap is 8.91 MB versus the legacy
+55.76 MB (ratio 0.160, ceiling 0.60). Explicit duplicate-value controls cover
+Full/Domain rules, mixed and single values, subdomains and misses. This repair
+requires a new immutable tag; v26.10.10-yue.1 remains unchanged. Node consumer
+pinning and Linux routing acceptance follow separately.
+
 ### 2026-10-17 rebase onto `v26.10.10` (`c412e77a..701af607`, 57 upstream commits)
 
 The yue series was replayed with `git cherry-pick -x` along the first-parent
