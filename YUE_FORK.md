@@ -10,15 +10,73 @@ deployed revision are owned by that repository and the deployment pipeline.
   [`v26.3.27`](https://github.com/XTLS/Xray-core/releases/tag/v26.3.27).
 - Latest canonical prerelease (checked 2026-09-14):
   [`v26.9.9`](https://github.com/XTLS/Xray-core/releases/tag/v26.9.9).
-- Exact base commit: `701af60772cda123492f86e383e1fdba066614a9` — upstream
-  tag [`v26.10.10`](https://github.com/XTLS/Xray-core/releases/tag/v26.10.10),
-  rebased 2026-10-17 (branch `codex-f/xray-v26.10.10-20261017`; proposed tag
-  `v26.10.10-yue.1`, created by the release owner, never by the rebase lane).
-- Previous bases: `c412e77a9b712082ac9ebf27fa793951cb5a7d85` (`upstream/main`,
+- Exact base commit: `1b1647cd9ddf0abc34b981d4611fc03bcac1ca74` — upstream
+  tag [`v26.10.21`](https://github.com/XTLS/Xray-core/releases/tag/v26.10.21)
+  (2026-10-21). Rebased 2026-10-26 from `v26.10.10-yue.2` (`6d5004ff`).
+  `core.Version_{x,y,z}` is `26.10.21`. Proposed tag `v26.10.21-yue.1` is
+  signed and pushed by the release owner, never by this lane.
+- Previous bases: `701af60772cda123492f86e383e1fdba066614a9` (upstream tag
+  `v26.10.10`, withdrawn; tags `v26.10.10-yue.1` / `v26.10.10-yue.2`);
+  `c412e77a9b712082ac9ebf27fa793951cb5a7d85` (`upstream/main`,
   2026-09-14, tags `v26.9.14-yue.1` .. `v26.9.22-yue.4`);
   `cd4ce973e9f6ef3a7acf9a7030927b4143f9ea47` (`upstream/main`,
   2026-09-04, tags `v26.9.4-yue.1` / `v26.9.11-yue.1`);
   `5ca6f4b7d4dc20a881d4330e498892697627ec0c` (= tag `v26.7.28`).
+
+### 2026-10-26 rebase onto `v26.10.21` (`701af607..1b1647cd`)
+
+Upstream withdrew `v26.10.10`. `v26.10.21` is the replacement. The first-parent
+line `701af607..v26.10.10-yue.2` (38 commits) was replayed with
+`git rebase --onto v26.10.21 701af607`. Review it with
+`git range-diff 701af607..v26.10.10-yue.2 v26.10.21..<branch>`.
+
+What `v26.10.21` changes for this fleet, and what this rebase did with it:
+
+| Upstream change | Disposition |
+|---|---|
+| `6307fa12` TLS RootCAs: `golang.org/x/crypto/x509roots/fallback` `v0.0.0-20261020153306-9f2b28d4331a` (commit `9f2b28d4`, three emSign roots removed) | **Kept.** Direct requirement, same as upstream. This is the fix yue-node PR 3 pinned as a stopgap; the fork now carries it, so that stopgap replace can go away with the consumer bump. |
+| `676a600e` REALITY `20261014101318-83f62178` (`14cefac` drops circl, `83f6217` makes `Config.PrivateKey` `*ecdh.PrivateKey`) | **Not adopted.** `require` stays `v0.0.0-20260921001439-3c98159dee38` and `replace` stays `github.com/onesyue/REALITY v0.0.0-yue.3`. The wrapper call sites that v26.10.21 grew for the new module API are put back on the yue.3 types (`PrivateKey []byte`, circl ML-DSA-65). Independent bits kept: master-key log mode `0o600`, `ecdhe.ECDH` error checks, stdlib `crypto/hkdf.Key`. `github.com/cloudflare/circl` is a direct requirement again because the wrapper imports it. |
+| `0f127f93` / #7176 Vision `rawInput` `*bytes.Buffer` (Go 1.27.3+) | **Adapted.** `vless.AccessTLSBuffers` still returns `(*bytes.Reader, **bytes.Buffer)` and accepts both a by-value `bytes.Buffer` (Go 1.27.1, utls, `CommonConn`, REALITY yue.3) and a `*bytes.Buffer` (Go 1.27.3+ stdlib). The address is `unsafe.Pointer(field.UnsafeAddr())` in one expression (the compiler's checkptr exception); the uintptr is never stored. A missing or third type returns `XTLS incompatible TLS input buffer layout` instead of panicking. `TestXTLSUnsafeFieldLayout` still requires `reality.Conn.rawInput` to be a `bytes.Buffer` by value, so `v0.0.0-yue.2` cannot come back; stdlib/utls/`CommonConn` may be either shape. |
+| `70ef97d5`, `8703fdb1` TUN and WireGuard drop gVisor | **Kept (upstream).** No Yue patch modified `proxy/tun`. `gvisor.dev/gvisor` stays an indirect module only because `golang.zx2c4.com/wireguard/tun`'s tests import it; this tree has no gVisor import. `TestNetTunCloseWithWriteInFlightDoesNotPanic` is rewritten against `netTun.WritePacket`: fill `netTunQueue`, Close must wake the blocked sender without a send-on-closed-channel panic. |
+
+Patch-by-patch, `701af607..v26.10.10-yue.2`:
+
+| Yue commit | Status |
+|---|---|
+| `d43da59a` Yue native VLESS fork | **Kept.** |
+| `ea325d91` pin release supply chain | **Kept.** |
+| `720ac2e6` test assets fail closed | **Kept.** |
+| `aa0b544f` Win7 Go security floor | **Kept.** |
+| `9bb3b9f8` release toolchain Go 1.26.7 | **Kept** (superseded in-tree by `714dad59`, which pins builders at 1.27.1). |
+| `520bd844` docker tag handling | **Kept.** Dockerfiles still pin `golang:1.27.1` and take upstream's Xray-rules-dat geodata URLs. |
+| `4ec747b7` historical scan exceptions | **Kept.** |
+| `0dd35339`, `5b6e81b3`, `87531b85`, `70110f7e`, `b93d0160`, `0d2a625c`, `931a98cb` fork ledger | **Kept.** |
+| `10f67791` task periodic counter | **Kept.** |
+| `763c923f` transport whitespace | **Kept.** |
+| `63e4dfa0` Go 1.26.8 builders | **Kept** (same as `9bb3b9f8`: later pin is 1.27.1). |
+| `2674eb0d` partial-buffer test | **Kept.** |
+| `21c2f99c` reality at 20260322 | **Kept** as a historical step. `go.mod` conflict resolved by moving only the reality line; the v26.10.21 fallback and the indirect gVisor line stayed. Superseded by the commits below. |
+| `714dad59` builders to Go 1.27.1 | **Kept.** |
+| `6a5b2a92` paced splice | **Kept.** |
+| `d9c90eff` asset-scoped geodata keys | **Kept** (already adapted to `CompactMphDomainMatcherFactory` on the v26.10.10 rebase; that form applied here). |
+| `cb1e9482` reality `e1986a4d` | **Kept** as a historical step, superseded by yue.3. |
+| `9bb5b838` legacy MPH differential guard | **Kept.** |
+| `deef302c` WireGuard close-with-write test | **Adapted.** The gVisor `CreateNetTUN(..., false)` shape is gone. The test now blocks in `WritePacket` on a full `netTunQueue` and asserts Close wakes it. See the gVisor row above. |
+| `49faa7a6` dependabot ignores xtls/reality | **Kept.** |
+| `2549a328` onesyue/REALITY `v0.0.0-yue.2` | **Kept** as a historical step, superseded by the next commit. `google/btree` was not re-added; upstream no longer requires it. |
+| `9b34bdfe` onesyue/REALITY `v0.0.0-yue.3` | **Kept.** Final `replace`. |
+| `18d082de` GC-visible Vision pointers | **Adapted** onto #7176. See the Vision row above. Call sites return `AccessTLSBuffers`' error. `TestAccessTLSBuffersValueAndPointerRawInput` covers both shapes. |
+| `79864e52` cross-platform test validation | **Kept.** |
+| `67fdc4bc` VLESS request-addons unknown fields | **Kept.** |
+| `d1ca2412` release assets job dependency | **Kept.** |
+| `ccda3094` close_notify regression tests | **Kept.** `NewVisionReader` now takes `**bytes.Buffer`; the reader test passes a pointer to an empty buffer. Upstream already contains `e5e85ca9`. |
+| `60ad303f` dependabot cooldown | **Kept.** |
+| `21473547` splice pacing chunk refresh | **Kept.** |
+| `ba94e7ca` keep app/dns and quic-go out of the VLESS graph | **Adapted.** Upstream replaced `newScriptEngine(path, router)` / `CompileFile` with `newScriptEngine(script)` / `xlua.Compile`, and moved `dns.RegisterLua` into `start`. The profile check runs at the start of `newScriptEngine`; `registerScriptDNS` is still the only DNS binding and is empty under `yue_profile_vless`. |
+| `468b14f4` routing-script tests outside the VLESS profile | **Kept.** |
+| `6d5004ff` arena matcher keeps repeated rule values | **Kept.** |
+
+No release tag is created or signed here. Signing keys stay on the owner's machine.
 
 ### 2026-10-18 production-corpus compatibility repair
 
@@ -48,7 +106,7 @@ not replayed). Review it with
 | Yue commit(s) | Disposition |
 |---|---|
 | `f73b333b` (cherry-pick of `e5e85ca9` / #6834) | **Dropped — upstream-equivalent.** Identical patch-id to `e5e85ca9`, an ancestor of `v26.10.10`. The fork's regression tests (`290f6c8d`: `proxy/vision_close_notify_yue_test.go`, `transport/internet/reality/reality_yue_closenotify_test.go`) are kept and pass on the upstream code. |
-| `d5f14b9a` (cherry-pick of `dbb1ea30` / #6778) | **Dropped — upstream-equivalent.** Identical patch-id to `dbb1ea30`, an ancestor of `v26.10.10`. `TestNetTunCloseWithWriteInFlightDoesNotPanic` (`eacb61d3`) is kept and passes. |
+| `d5f14b9a` (cherry-pick of `dbb1ea30` / #6778) | **Dropped — upstream-equivalent.** Identical patch-id to `dbb1ea30`, an ancestor of `v26.10.10`. `TestNetTunCloseWithWriteInFlightDoesNotPanic` (`eacb61d3`) was kept against the gVisor stack. The 2026-10-26 rebase adapts that test onto the non-gVisor `netTun`. |
 | `bd121e3a` (header-free MPH table) | **Production hunk dropped — upstream-equivalent; test kept and adapted.** Upstream `2953d447` (#6821) and `6243d2a2` (#6867) rewrote `MphMatcherGroup` into an arena layout that removes the same per-rule slice/string headers; `matchergroup_mph.go` is now byte-identical to upstream. The differential guard `matchergroup_mph_compact_yue_test.go` still embeds the pre-2026-09-20 implementation and now compares upstream's table with it (Match values and order, MatchAny, retained-heap ratio <= 0.60): green on the committed `geosite.dat`. Adaptations: the reference carries its own `RollingHash`/`MemHash`/`PrimeRK` (no longer exported) and asserts the rule-count floor on itself. |
 | `b541e572` (asset-scoped geodata keys) | **Adapted.** Upstream renamed `CompactDomainMatcherFactory` to `CompactMphDomainMatcherFactory` (cache value `MphValueMatcher`) and still keys on the bare file name; the key change is reapplied there and the test constructs the renamed factory. |
 | `386d240e`, `9217a9bb` | **Adapted.** Upstream `61cad5ec` (#6796) removed `(*errors.Error).AtError()`; the four new error returns drop the call. No other change. |
@@ -250,7 +308,7 @@ bytes"):
   server (`reality.Conn`) and client (`reality.UConn`) handshake; same 0-byte
   assertion after `proxy.SuppressOuterCloseNotify`, with controls.
 
-Retire with the next rebase onto an upstream base that contains `e5e85ca9`.
+Retired on the 2026-10-17 rebase: `e5e85ca9` is an ancestor of `v26.10.10` and of `v26.10.21`. The regression tests stay.
 
 ### v26.9.22-yue.2 (2026-09-23): VLESS request-addons unknown fields reach the embedder
 
@@ -443,3 +501,8 @@ end-to-end case under `-race`, including checkptr. It transfers TLS payloads
 through real local REALITY and VLESS connections and asserts the raw-copy path
 was reached; no Internet, external probe target, or disabled pointer checking
 is required.
+
+2026-10-26: upstream #7176 replaced the per-call-site `unsafe.Add` casts with
+`AccessTLSBuffers`. The checkptr rule is unchanged (no stored `uintptr`). The
+function additionally accepts `rawInput *bytes.Buffer` so a Go 1.27.3+ stdlib
+does not fault, while REALITY yue.3 stays a by-value `bytes.Buffer`.

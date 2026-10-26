@@ -11,41 +11,53 @@ import (
 	"github.com/xtls/xray-core/proxy/vless/encryption"
 )
 
-// [YUE] TestXTLSUnsafeFieldLayout pins the struct layout that
-// proxy/vless/inbound and proxy/vless/outbound depend on: both look up the
-// unexported "input" and "rawInput" fields by reflect and cast
-// (p + field.Offset) to *bytes.Reader / *bytes.Buffer via unsafe.Pointer.
-// That is only memory-safe while those fields ARE a bytes.Reader and a
-// bytes.Buffer stored by value. onesyue/REALITY v0.0.0-yue.2 made
-// reality.Conn.rawInput a *bytes.Buffer (pooled) and yue-node 743c0876 died
-// on the canary with "fatal error: fault". A missing field is just as bad:
-// FieldByName returns the zero StructField and the cast lands on offset 0.
+// TestXTLSUnsafeFieldLayout pins the struct layout Vision reads.
+//
+// input is a bytes.Reader on every connection Vision touches.
+// rawInput is a bytes.Buffer by value on Go 1.27.1, utls, CommonConn, and
+// onesyue/REALITY v0.0.0-yue.3. Go 1.27.3+ crypto/tls stores *bytes.Buffer
+// (upstream #7176). AccessTLSBuffers accepts either rawInput shape and
+// returns an error for anything else, so a pointer rawInput is no longer a
+// use-after-cast fault. reality.Conn is the exception that must stay a
+// value: v0.0.0-yue.2 pooled it as *bytes.Buffer and the canary died with
+// "fatal error: fault". That module must never be consumed again, and this
+// assertion is what turns a silent re-bump into a red test.
 func TestXTLSUnsafeFieldLayout(t *testing.T) {
 	bufferT := reflect.TypeOf(bytes.Buffer{})
+	bufferPtrT := reflect.TypeOf((*bytes.Buffer)(nil))
 	readerT := reflect.TypeOf(bytes.Reader{})
 	cases := []struct {
-		name string
-		typ  reflect.Type
+		name         string
+		typ          reflect.Type
+		allowPointer bool
 	}{
-		{"github.com/xtls/reality.Conn (VLESS inbound, REALITY)", reflect.TypeOf(reality.Conn{})},
-		{"crypto/tls.Conn (VLESS inbound/outbound, TLS)", reflect.TypeOf(gotls.Conn{})},
-		{"github.com/refraction-networking/utls.Conn (VLESS outbound, uTLS + REALITY client)", reflect.TypeOf(utls.Conn{})},
-		{"proxy/vless/encryption.CommonConn (VLESS encryption)", reflect.TypeOf(encryption.CommonConn{})},
+		{"github.com/xtls/reality.Conn (VLESS inbound, REALITY)", reflect.TypeOf(reality.Conn{}), false},
+		{"crypto/tls.Conn (VLESS inbound/outbound, TLS)", reflect.TypeOf(gotls.Conn{}), true},
+		{"github.com/refraction-networking/utls.Conn (VLESS outbound, uTLS + REALITY client)", reflect.TypeOf(utls.Conn{}), true},
+		{"proxy/vless/encryption.CommonConn (VLESS encryption)", reflect.TypeOf(encryption.CommonConn{}), true},
 	}
 	for _, tc := range cases {
-		for _, want := range []struct {
-			field string
-			typ   reflect.Type
-		}{{"input", readerT}, {"rawInput", bufferT}} {
-			f, ok := tc.typ.FieldByName(want.field)
-			if !ok {
-				t.Errorf("%s: field %q is gone; the Vision unsafe cast would read offset 0", tc.name, want.field)
-				continue
-			}
-			if f.Type != want.typ {
-				t.Errorf("%s: field %q has type %v, want %v by value; Vision's (*%v)(unsafe.Pointer(p+Offset)) cast would read garbage",
-					tc.name, want.field, f.Type, want.typ, want.typ)
-			}
+		input, ok := tc.typ.FieldByName("input")
+		if !ok || input.Type != readerT {
+			t.Errorf("%s: input = %v, want bytes.Reader by value", tc.name, fieldType(input, ok))
+		}
+		raw, ok := tc.typ.FieldByName("rawInput")
+		if !ok {
+			t.Errorf("%s: field rawInput is gone", tc.name)
+			continue
+		}
+		switch {
+		case raw.Type == bufferT:
+		case tc.allowPointer && raw.Type == bufferPtrT:
+		default:
+			t.Errorf("%s: rawInput has type %v, want bytes.Buffer by value", tc.name, raw.Type)
 		}
 	}
+}
+
+func fieldType(f reflect.StructField, ok bool) string {
+	if !ok {
+		return "missing"
+	}
+	return f.Type.String()
 }

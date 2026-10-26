@@ -7,7 +7,6 @@ import (
 	"crypto/ed25519"
 	"crypto/hkdf"
 	"crypto/hmac"
-	"crypto/mldsa"
 	"crypto/sha256"
 	"crypto/sha512"
 	gotls "crypto/tls"
@@ -24,6 +23,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
 	utls "github.com/refraction-networking/utls"
 	"github.com/xtls/reality"
 	"github.com/xtls/xray-core/common/crypto"
@@ -114,8 +114,8 @@ func (c *UConn) VerifyPeerCertificate(rawCerts [][]byte, verifiedChains [][]*x50
 				if len(certs[0].Extensions) > 0 {
 					h.Write(c.HandshakeState.Hello.Raw)
 					h.Write(c.HandshakeState.ServerHello.Raw)
-					verify, _ := mldsa.NewPublicKey(mldsa.MLDSA65(), c.Config.Mldsa65Verify)
-					if mldsa.Verify(verify, h.Sum(nil), certs[0].Extensions[0].Value, nil) == nil {
+					verify, _ := mldsa65.Scheme().UnmarshalBinaryPublicKey(c.Config.Mldsa65Verify)
+					if mldsa65.Verify(verify.(*mldsa65.PublicKey), h.Sum(nil), nil, certs[0].Extensions[0].Value) {
 						c.Verified = true
 						return nil
 					}

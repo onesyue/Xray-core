@@ -168,8 +168,11 @@ func TestVisionReaderDirectCopySuppressesOuterCloseNotify(t *testing.T) {
 	payload.Write([]byte{0x17, 0x03, 0x03, 0x00, 0x01, 0x00})
 	padded := XtlsPadding(payload, CommandPaddingDirect, &writerUUID, false, context.Background(), []uint32{0, 0, 0, 0})
 
+	// rawInput is **bytes.Buffer since upstream #7176: a by-value buffer (Go
+	// 1.27.1 / REALITY yue.3) is addressed, a pooled *bytes.Buffer is followed.
+	raw := &bytes.Buffer{}
 	r := NewVisionReader(&singleMultiBufferReader{mb: buf.MultiBuffer{padded}}, ts, true,
-		context.Background(), conn, &bytes.Reader{}, &bytes.Buffer{}, nil)
+		context.Background(), conn, &bytes.Reader{}, &raw, nil)
 	mb, err := r.ReadMultiBuffer()
 	buf.ReleaseMulti(mb)
 	if err != nil {

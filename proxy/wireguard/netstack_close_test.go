@@ -6,37 +6,35 @@ import (
 	"time"
 )
 
-// Closing the gVisor-backed TUN while the stack is delivering an outbound packet
-// through WriteNotify must not panic. Before dbb1ea30 Close() closed
-// incomingPacket while WriteNotify could still be blocked sending on it (nobody
-// was reading the device), which is a "send on closed channel" panic that takes
-// the whole process down — reachable on every Xray hot reload of a node that has
-// a WireGuard outbound with an in-flight DNS lookup.
+// Closing the userspace TUN while a packet is queued for the device must not
+// panic. Upstream v26.10.21 replaced the gVisor stack (#7130, #7156), so the
+// old WriteNotify/incomingPacket panic (dbb1ea30) is gone with that stack.
+// The replacement blocks in WritePacket only when netTunQueue is full, and
+// Close must wake that sender via the closed channel instead of sending on a
+// closed channel. That is the hot-reload path for a WireGuard outbound.
 func TestNetTunCloseWithWriteInFlightDoesNotPanic(t *testing.T) {
-	dev, tnet, _, err := CreateNetTUN([]netip.Addr{netip.MustParseAddr("10.9.0.2")}, nil, 1420, false)
+	dev, _, err := CreateNetTUN([]netip.Addr{netip.MustParseAddr("10.9.0.2")}, nil, 1420, nil)
 	if err != nil {
 		t.Fatalf("CreateNetTUN: %v", err)
 	}
-	conn, err := tnet.DialUDPAddrPort(netip.AddrPort{}, netip.MustParseAddrPort("10.9.0.1:53"))
-	if err != nil {
-		t.Fatalf("DialUDPAddrPort: %v", err)
-	}
-	defer conn.Close()
+	nt := dev.(*netTun)
 
-	// No reader drains dev.Read, so the stack's WriteNotify blocks on the
-	// unbuffered incomingPacket channel inside this Write.
-	writeDone := make(chan struct{})
+	for i := 0; i < netTunQueue; i++ {
+		if err := nt.WritePacket(nil, []byte("queued")); err != nil {
+			t.Fatalf("fill queue: %v", err)
+		}
+	}
+
+	writeDone := make(chan error, 1)
 	go func() {
-		defer close(writeDone)
-		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		_, _ = conn.Write([]byte("in-flight"))
+		writeDone <- nt.WritePacket(nil, []byte("in-flight"))
 	}()
 
-	// The write must be parked in WriteNotify; if it already returned, the
-	// scenario was not exercised and the test proves nothing.
+	// The extra write must be parked on the full queue. If it already
+	// returned, Close did not race a blocked sender and the test proves nothing.
 	select {
-	case <-writeDone:
-		t.Fatal("write returned before Close; WriteNotify never blocked")
+	case err := <-writeDone:
+		t.Fatalf("write returned before Close (%v); WritePacket never blocked", err)
 	case <-time.After(200 * time.Millisecond):
 	}
 
@@ -44,15 +42,21 @@ func TestNetTunCloseWithWriteInFlightDoesNotPanic(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 	select {
-	case <-writeDone:
+	case err := <-writeDone:
+		if err == nil {
+			t.Fatal("blocked WritePacket succeeded after Close")
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("in-flight write did not return after Close")
 	}
 
-	// Read after Close reports closure instead of blocking or panicking.
+	// Queued packets may still be readable. Once they are drained, Read
+	// reports closure instead of blocking or panicking.
 	bufs := [][]byte{make([]byte, 1500)}
 	sizes := []int{0}
-	if _, err := dev.Read(bufs, sizes, 0); err == nil {
-		t.Fatal("Read after Close must fail")
+	for {
+		if _, err := dev.Read(bufs, sizes, 0); err != nil {
+			break
+		}
 	}
 }
