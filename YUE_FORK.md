@@ -78,6 +78,20 @@ Patch-by-patch, `701af607..v26.10.10-yue.2`:
 
 No release tag is created or signed here. Signing keys stay on the owner's machine.
 
+Gates run 2026-10-26 on Go 1.27.1, with the workflow's pinned `resources/geosite.dat` and `resources/geoip.dat` (not the 11 MB jp-premium corpus; `6d5004ff` was already measured on that file and replayed unchanged):
+
+```sh
+go build ./...                                          # pass
+go build -tags yue_profile_vless ./...                  # pass
+go test -timeout 1h ./...                               # pass
+go test -race -timeout 1h ./common/... ./app/dispatcher \
+  ./app/proxyman/inbound ./proxy ./transport/internet/tls  # pass
+go test -tags yue_profile_vless -timeout 1h ./...       # pass
+go test -race -count=1 ./transport/internet/reality/    # pass
+go test -race -count=1 -run TestVlessVisionRealityInProcessDirectCopy \
+  ./testing/scenarios                                   # pass
+```
+
 ### 2026-10-18 production-corpus compatibility repair
 
 The original v26.10.10-yue.1 candidate failed strict legacy Match equivalence
