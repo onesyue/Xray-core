@@ -1,3 +1,5 @@
+# Owner policy: no automatic Issues or PRs. Security-update PRs are separately
+# disabled in repository settings; dependency alerts and scans remain enabled.
 # To get started with Dependabot version updates, you'll need to specify which
 # package ecosystems to update and where the package manifests are located.
 # Please see the documentation for all configuration options:
@@ -6,6 +8,7 @@
 version: 2
 updates:
   - package-ecosystem: "gomod"
+    open-pull-requests-limit: 0
     directory: "/" # Location of package manifests
     schedule:
       interval: "daily"
@@ -20,6 +23,7 @@ updates:
       # never a bot PR.
       - dependency-name: "github.com/xtls/reality"
   - package-ecosystem: "github-actions"
+    open-pull-requests-limit: 0
     directory: "/"
     schedule:
       interval: "daily"
